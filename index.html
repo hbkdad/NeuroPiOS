@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeuroPiOS — AI-First Raspberry Pi OS</title>
+  <meta name="description" content="NeuroPiOS is an AI-first operating system experience for Raspberry Pi with a local LLM shell, live monitoring, and lightweight terminal-native control." />
+  <style>
+    :root {
+      --bg: #05070b;
+      --bg-soft: #0b1118;
+      --panel: rgba(12, 20, 30, 0.78);
+      --panel-2: rgba(8, 14, 22, 0.92);
+      --line: rgba(0, 255, 170, 0.18);
+      --line-strong: rgba(0, 255, 170, 0.38);
+      --text: #d7fff3;
+      --muted: #8cbeb0;
+      --primary: #00ff9c;
+      --primary-2: #00d8ff;
+      --danger: #ff4d6d;
+      --glow: 0 0 18px rgba(0, 255, 156, 0.25);
+      --radius: 18px;
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+      --max: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(0, 216, 255, 0.08), transparent 28%),
+        radial-gradient(circle at 80% 0%, rgba(0, 255, 156, 0.08), transparent 30%),
+        linear-gradient(180deg, #04070a 0%, #071019 45%, #04070a 100%);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,255,156,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,156,0.035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(to bottom, rgba(255,255,255,.65), transparent 85%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .scanline {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(to bottom, transparent 0%, rgba(255,255,255,0.03) 50%, transparent 100%);
+      background-size: 100% 6px;
+      mix-blend-mode: soft-light;
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .orb {
+      position: fixed;
+      width: 420px;
+      height: 420px;
+      border-radius: 50%;
+      filter: blur(90px);
+      opacity: 0.12;
+      pointer-events: none;
+      z-index: 0;
+      animation: floatOrb 14s ease-in-out infinite;
+    }
+
+    .orb.one {
+      background: var(--primary);
+      top: -120px;
+      right: -90px;
+    }
+
+    .orb.two {
+      background: var(--primary-2);
+      left: -120px;
+      top: 360px;
+      animation-delay: -7s;
+    }
+
+    @keyframes floatOrb {
+      0%, 100% { transform: translateY(0) translateX(0); }
+      50% { transform: translateY(35px) translateX(18px); }
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 2;
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(12px);
+      background: rgba(3, 8, 13, 0.62);
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      z-index: 10;
+    }
+
+    .nav-inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-badge {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      border: 1px solid var(--line-strong);
+      background: linear-gradient(135deg, rgba(0,255,156,0.12), rgba(0,216,255,0.08));
+      box-shadow: var(--glow);
+      font-size: 18px;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.95rem;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 46px;
+      padding: 0 18px;
+      border-radius: 14px;
+      border: 1px solid var(--line-strong);
+      text-decoration: none;
+      color: var(--text);
+      background: linear-gradient(180deg, rgba(0,255,156,0.12), rgba(0,255,156,0.06));
+      box-shadow: var(--glow);
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .btn:hover { transform: translateY(-1px); }
+    .btn.secondary {
+      background: rgba(255,255,255,0.02);
+      box-shadow: none;
+    }
+
+    .hero {
+      padding: 78px 0 44px;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 30px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.02);
+      color: var(--muted);
+      margin-bottom: 18px;
+      font-size: 0.92rem;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: clamp(2.6rem, 5vw, 5.4rem);
+      line-height: 0.96;
+      letter-spacing: -0.04em;
+    }
+
+    .gradient {
+      background: linear-gradient(90deg, var(--text), var(--primary), var(--primary-2));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 640px;
+      color: var(--muted);
+      font-size: 1.08rem;
+      line-height: 1.7;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 26px;
+    }
+
+    .hero-card {
+      position: relative;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(8,18,28,0.94), rgba(5,10,16,0.82));
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: 460px;
+    }
+
+    .hero-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top right, rgba(0,216,255,0.18), transparent 30%);
+      pointer-events: none;
+    }
+
+    .terminal-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.red { background: #ff5f56; }
+    .dot.yellow { background: #ffbd2e; }
+    .dot.green { background: #27c93f; }
+
+    .terminal {
+      padding: 20px;
+      font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+      font-size: 0.96rem;
+      color: #a7ffe0;
+      line-height: 1.6;
+    }
+
+    .prompt { color: var(--primary); }
+    .cursor {
+      display: inline-block;
+      width: 10px;
+      height: 1.1em;
+      transform: translateY(3px);
+      background: var(--primary);
+      animation: blink 1s steps(1) infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+      margin: 28px 0 70px;
+    }
+
+    .stat, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .stat {
+      padding: 18px;
+      grid-column: span 3;
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .stat .value {
+      margin-top: 10px;
+      font-size: 1.8rem;
+      font-weight: 700;
+    }
+
+    section {
+      padding: 24px 0 18px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: clamp(1.8rem, 3vw, 3rem);
+      letter-spacing: -0.03em;
+    }
+
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 620px;
+      line-height: 1.7;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .feature-card {
+      padding: 22px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      transition: transform .18s ease, border-color .18s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--line-strong);
+    }
+
+    .feature-card .icon {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: rgba(0,255,156,0.08);
+      border: 1px solid var(--line);
+      font-size: 1.2rem;
+      margin-bottom: 14px;
+    }
+
+    .feature-card h3 {
+      margin: 0 0 10px;
+      font-size: 1.1rem;
+    }
+
+    .feature-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .panel {
+      padding: 24px;
+      background: var(--panel-2);
+    }
+
+    .panel h3 {
+      margin-top: 0;
+      margin-bottom: 12px;
+      font-size: 1.2rem;
+    }
+
+    .checklist, .steps {
+      display: grid;
+      gap: 12px;
+    }
+
+    .check, .step {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .check b, .step b { color: var(--text); }
+
+    .badge {
+      min-width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      color: var(--primary);
+      font-size: 0.84rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    .cta {
+      margin: 36px 0 74px;
+      padding: 28px;
+      border-radius: 26px;
+      background: linear-gradient(135deg, rgba(0,255,156,0.08), rgba(0,216,255,0.06));
+      border: 1px solid var(--line-strong);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .cta h3 {
+      margin: 0 0 8px;
+      font-size: 1.6rem;
+    }
+
+    .cta p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+      max-width: 720px;
+    }
+
+    footer {
+      padding: 0 0 40px;
+      color: var(--muted);
+    }
+
+    .footer-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    code.inline {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 2px 8px;
+      color: var(--text);
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .two-col,
+      .cta { grid-template-columns: 1fr; }
+      .feature-grid { grid-template-columns: 1fr 1fr; }
+      .stat { grid-column: span 6; }
+    }
+
+    @media (max-width: 680px) {
+      .nav-links { display: none; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .stat { grid-column: span 12; }
+      .hero { padding-top: 52px; }
+      h1 { line-height: 1; }
+      .cta { padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="orb one"></div>
+  <div class="orb two"></div>
+  <div class="scanline"></div>
+
+  <div class="nav">
+    <div class="nav-inner">
+      <div class="brand">
+        <div class="brand-badge">🧠</div>
+        <div>NeuroPiOS</div>
+      </div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="#install">Install</a>
+        <a href="#support">Support</a>
+        <a class="btn secondary" href="https://github.com/hbkdad/NeuroPiOS" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Local AI shell • Raspberry Pi 3B optimized • Linux ARM</div>
+        <h1>Build the <span class="gradient">AI-first OS layer</span> for Raspberry Pi.</h1>
+        <p>
+          NeuroPiOS replaces rigid command flow with a lightweight local AI shell, live system context, and a terminal-native interface designed for real ARM hardware.
+        </p>
+        <div class="hero-actions">
+          <a class="btn" href="#install">Get Started</a>
+          <a class="btn secondary" href="YOUR_DOWNLOAD_LINK_HERE">Download Build</a>
+          <a class="btn secondary" href="https://ko-fi.com/neroos" id="support">Support / Donate</a>
+        </div>
+      </div>
+
+      <div class="hero-card">
+        <div class="terminal-top">
+          <div class="dot red"></div>
+          <div class="dot yellow"></div>
+          <div class="dot green"></div>
+        </div>
+        <div class="terminal" id="terminal-demo">
+          <div><span class="prompt">neuropios@pi3b:~$</span> show system health</div>
+          <div>> Context loaded: cpu, memory, disk, routes, processes</div>
+          <div>> AI plan: inspect current health and summarize bottlenecks</div>
+          <div>> CPU: 18%  RAM: 47%  Disk: 62%  Load: 0.28</div>
+          <div>> Status: healthy, no corrective action needed</div>
+          <div><span class="prompt">neuropios@pi3b:~$</span> <span class="cursor"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <div class="stat"><div class="label">Target Device</div><div class="value">Pi 3B</div></div>
+      <div class="stat"><div class="label">Shell Model</div><div class="value">Local LLM</div></div>
+      <div class="stat"><div class="label">UI Mode</div><div class="value">Hybrid TUI</div></div>
+      <div class="stat"><div class="label">Execution Style</div><div class="value">Explain → Confirm → Run</div></div>
+    </div>
+
+    <section id="features">
+      <div class="section-head">
+        <div>
+          <h2>Professional core, hacker energy.</h2>
+        </div>
+        <p>
+          The project is structured like a real product: shell intelligence, context API, monitoring, safety controls, and a lightweight interface that still feels premium.
+        </p>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="icon">🤖</div>
+          <h3>Natural-Language Shell</h3>
+          <p>Translate intent into commands, explain what the system is doing, and keep execution human-approved by default.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">📡</div>
+          <h3>Live Context Layer</h3>
+          <p>Expose CPU, RAM, disk, process, route, and log context through a local daemon so the shell reasons with real state.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🛡️</div>
+          <h3>Safety-First Control</h3>
+          <p>Block destructive patterns, require confirmation for risky actions, and build toward tiered permissions and sandbox execution.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="two-col">
+        <div class="panel" id="roadmap">
+          <h3>Roadmap</h3>
+          <div class="steps">
+            <div class="step"><div class="badge">1</div><div><b>Execution Flow</b><br>Run commands inside the interface with confirmation and output streaming.</div></div>
+            <div class="step"><div class="badge">2</div><div><b>Website + Product Layer</b><br>Add downloads, release notes, screenshots, and support options.</div></div>
+            <div class="step"><div class="badge">3</div><div><b>Auto Deploy</b><br>Push to GitHub and let Netlify publish each update automatically.</div></div>
+            <div class="step"><div class="badge">4</div><div><b>Installable Builds</b><br>Package a flashable image and paid supporter builds later.</div></div>
+          </div>
+        </div>
+
+        <div class="panel" id="install">
+          <h3>Install Snapshot</h3>
+          <div class="checklist">
+            <div class="check"><div class="badge">✓</div><div><b>Clone or copy project</b><br><code class="inline">git clone ...</code> or move your Pi files into the repo.</div></div>
+            <div class="check"><div class="badge">✓</div><div><b>Create venv</b><br><code class="inline">python3 -m venv .venv</code> then activate it.</div></div>
+            <div class="check"><div class="badge">✓</div><div><b>Install requirements</b><br><code class="inline">pip install -r requirements.txt</code></div></div>
+            <div class="check"><div class="badge">✓</div><div><b>Run stack</b><br>Context daemon, health daemon, then the hybrid UI.</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="panel">
+        <div class="section-head" style="margin-bottom:10px;">
+          <div><h2>Use cases</h2></div>
+          <p>NeuroPiOS is built for local-first AI control on low-power hardware, not just demos.</p>
+        </div>
+        <div class="feature-grid">
+          <div class="feature-card">
+            <div class="icon">🧪</div>
+            <h3>AI-native experiments</h3>
+            <p>Prototype a future Linux interface where the shell is conversational but still transparent and inspectable.</p>
+          </div>
+          <div class="feature-card">
+            <div class="icon">🖥️</div>
+            <h3>Terminal-first systems</h3>
+            <p>Skip heavy desktop environments and boot into a focused operational interface that stays responsive on older Pi boards.</p>
+          </div>
+          <div class="feature-card">
+            <div class="icon">💸</div>
+            <h3>Monetizable project base</h3>
+            <p>Grow toward downloadable images, premium builds, consulting, custom installs, or sponsor-backed open development.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="cta">
+      <div>
+        <h3>Support the build or grab the next release.</h3>
+        <p>
+          Use your donation link now, then later swap in a real release download, Gumroad listing, or supporter-only build page.
+        </p>
+      </div>
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <a class="btn" href="YOUR_DONATION_LINK_HERE">Donate</a>
+        <a class="btn secondary" href="YOUR_DOWNLOAD_LINK_HERE">Download</a>
+      </div>
+    </div>
+
+    <footer>
+      <div class="footer-row">
+        <div>© <span id="year"></span> NeuroPiOS</div>
+        <div>
+          <a href="https://github.com/hbkdad/NeuroPiOS" target="_blank" rel="noopener" style="color:var(--muted); text-decoration:none;">GitHub</a>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const terminal = document.getElementById('terminal-demo');
+    const states = [
+      [
+        'neuropios@pi3b:~$ show memory usage',
+        '> Context loaded: vm stats, top processes',
+        '> RAM: 46% used | largest process: ollama',
+        '> Suggestion: keep tinyllama warm, keep_alive 1m'
+      ],
+      [
+        'neuropios@pi3b:~$ diagnose port conflict',
+        '> Context loaded: listeners, process table, recent logs',
+        '> Found conflict on :8765 from earlier contextd instance',
+        '> Suggested action: pkill -f "src.contextd"'
+      ],
+      [
+        'neuropios@pi3b:~$ check system health',
+        '> CPU: 19%  RAM: 48%  Disk: 62%  Load: 0.32',
+        '> No OOM events found in recent logs',
+        '> Status: stable'
+      ]
+    ];
+
+    let idx = 0;
+    setInterval(() => {
+      idx = (idx + 1) % states.length;
+      const lines = states[idx]
+        .map((line, i) => i === 0 ? `<div><span class="prompt">${line.split('$')[0]}$</span>${line.substring(line.indexOf('$') + 1)}</div>` : `<div>${line}</div>`)
+        .join('');
+      terminal.innerHTML = lines + '<div><span class="prompt">neuropios@pi3b:~$</span> <span class="cursor"></span></div>';
+    }, 4200);
+  </script>
+</body>
+</html>
