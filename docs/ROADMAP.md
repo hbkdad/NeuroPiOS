@@ -56,11 +56,16 @@ Phases as defined by the orchestration brief. Status reflects reality as of mile
 - `simulations/poig_sim`: added `tests/test_stake_concentration.py`, giving `docs/security/ECONOMIC-ATTACKS.md`'s "Stake concentration" row real simulation coverage by reusing `quorum.py`'s existing weighted aggregation. Isolates weight concentration from headcount: a 2-of-10 dishonest minority with concentrated stake (weight 40 vs. the honest majority's 8) dominates the quorum outcome; the identical 2-of-10 headcount split under equal weights does not; a weight sweep confirms the flip point tracks the whales' aggregate weight share crossing 50%. Confirms this remains a genuinely open design gap, honestly consistent with the mitigation column's existing "not fully resolved" framing. 3 new tests.
 - Total test count: 78 (22 Python + 56 Rust), all passing, clippy-clean, fmt-clean.
 
+## Milestone 8 changes (this update)
+
+- `simulations/poig_sim`: added `tests/test_wash_trading.py`, giving `docs/security/ECONOMIC-ATTACKS.md`'s "Fake demand / wash activity" row real (partial) simulation coverage. Two distinct sock-puppet identities (a genuinely different attack from self-dealing, which uses one identity) cycling capital through many rounds cannot net-extract more cumulative reward than they commit, even at the attacker's most favorable settings — the multiplicative reward formula's structure is what prevents direct profit, not graph analysis. Honestly scoped: this only covers the direct-profit variant, not the separate "fake apparent network activity for optics" variant, which remains unmitigated and unsimulated. 3 new tests.
+- Total test count: 81 (25 Python + 56 Rust), all passing, clippy-clean, fmt-clean.
+
 ## Next highest-priority task (per COMPLETION RULE)
 
 Resolve the 3-node relayed Kademlia discovery issue documented in `crates/aion-p2p/README.md` — this is the concrete remaining gap toward the Phase 3 MVP exit criterion "three machines discover each other," and the diagnostic trail already narrows it to response handling between the responder sending a correct closer-peer list and the requester's query algorithm recording it. Needs `libp2p-kad` protocol-level tracing to pin down definitively.
 
-Second-priority: extend `docs/security/ECONOMIC-ATTACKS.md`'s remaining "No" rows (treasury drain modeling, fake demand/wash activity, front-running, griefing) with real simulation coverage where feasible in `simulations/poig_sim`.
+Second-priority: extend `docs/security/ECONOMIC-ATTACKS.md`'s remaining "No" rows (treasury drain modeling, front-running, griefing) with real simulation coverage where feasible in `simulations/poig_sim`.
 
 ## Definition of MVP (unchanged from brief, restated for tracking)
 
