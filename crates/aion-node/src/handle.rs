@@ -7,20 +7,26 @@
 //! command/event API -- so a caller never touches `Swarm` directly.
 //!
 //! Honest scope note: this is a real, working event loop (dial, listen,
-//! gossip subscribe/publish, Kademlia bootstrap-seeding/queries, and the
-//! events that matter for those), not a full command surface over every
-//! behaviour this crate wires in (AutoNAT status and relay reservations
-//! aren't exposed through `NodeHandle` yet) -- it covers what
-//! `tests/node_gossip.rs` and `crates/aion-p2p/tests/kademlia_discovery.rs`
-//! already proved work manually, now reachable without hand-rolling the
-//! event loop, and is meant to grow incrementally as real callers need
-//! more of the surface.
+//! gossip subscribe/publish, Kademlia bootstrap-seeding/queries, AutoNAT
+//! status, and relay-server activity, and the events that matter for
+//! those), not a full command surface over every behaviour this crate
+//! wires in -- relay-CLIENT reservation confirmation isn't surfaced as
+//! its own event yet (though `listen_on`/`dial` already work transparently
+//! with `/p2p-circuit` addresses via the generic commands, and a
+//! successful reservation still fires the ordinary `NewListenAddr` event;
+//! see `crates/aion-p2p/tests/circuit_relay.rs`). It covers what
+//! `tests/node_gossip.rs`, `crates/aion-p2p/tests/kademlia_discovery.rs`,
+//! `crates/aion-p2p/tests/autonat_reachability.rs`, and
+//! `crates/aion-p2p/tests/circuit_relay.rs` already proved work manually,
+//! now reachable without hand-rolling the event loop, and is meant to
+//! grow incrementally as real callers need more of the surface.
 
 use aion_p2p::{AionBehaviour, AionBehaviourEvent, Topic};
 use futures::StreamExt;
 use libp2p::{
     autonat, gossipsub,
     kad::{self, QueryResult},
+    relay,
     swarm::SwarmEvent,
     Multiaddr, PeerId, Swarm,
 };
@@ -33,6 +39,7 @@ enum Command {
     Publish(gossipsub::IdentTopic, Vec<u8>),
     AddKademliaBootstrapPeer(PeerId, Multiaddr),
     FindClosestPeers(PeerId),
+    AddExternalAddress(Multiaddr),
 }
 
 /// Events surfaced to a `NodeHandle` from its background swarm. Not
@@ -66,6 +73,22 @@ pub enum NodeEvent {
     NatStatusChanged {
         old: autonat::NatStatus,
         new: autonat::NatStatus,
+    },
+    /// This node, acting as a RELAY for `src_peer_id`, accepted a
+    /// reservation request from them -- see
+    /// `crates/aion-p2p/tests/circuit_relay.rs`'s "Phase 1". Useful for a
+    /// relay operator to observe real relaying activity (e.g. for future
+    /// reputation/incentive accounting -- relaying for others is real
+    /// bandwidth expenditure on the relay's behalf).
+    RelayReservationAccepted {
+        src_peer_id: PeerId,
+    },
+    /// This node, acting as a RELAY, accepted and is now forwarding a
+    /// circuit connection from `src_peer_id` to `dst_peer_id` -- see
+    /// `crates/aion-p2p/tests/circuit_relay.rs`'s "Phase 2".
+    RelayCircuitAccepted {
+        src_peer_id: PeerId,
+        dst_peer_id: PeerId,
     },
 }
 
@@ -119,6 +142,21 @@ impl NodeHandle {
         let _ = self.commands.send(Command::FindClosestPeers(target));
     }
 
+    /// Manually confirms `addr` as an externally-reachable address for
+    /// this node. Real deployments would normally rely on AutoNAT (see
+    /// `NodeEvent::NatStatusChanged`) to confirm this automatically, but a
+    /// relay operator who already knows their own public address (or a
+    /// loopback-only test environment, where AutoNAT's `only_global_ips`
+    /// correctly refuses to confirm one on its own -- see
+    /// `crates/aion-p2p/tests/circuit_relay.rs`) needs to be able to set
+    /// it directly: `relay::Behaviour`'s server role only advertises
+    /// addresses it has confirmed as external when accepting a
+    /// reservation, so a relay with no confirmed external address cannot
+    /// usefully relay for anyone.
+    pub fn add_external_address(&self, addr: Multiaddr) {
+        let _ = self.commands.send(Command::AddExternalAddress(addr));
+    }
+
     /// Awaits the next event from this node's background swarm. Returns
     /// `None` once the background task has stopped (e.g. this handle and
     /// all its clones were dropped, closing the command channel).
@@ -158,6 +196,9 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                         }
                         Some(Command::FindClosestPeers(target)) => {
                             swarm.behaviour_mut().kademlia.get_closest_peers(target);
+                        }
+                        Some(Command::AddExternalAddress(addr)) => {
+                            swarm.add_external_address(addr);
                         }
                         // All NodeHandle clones dropped -- nothing left to
                         // drive this swarm on behalf of, so stop the task
@@ -206,6 +247,19 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                             autonat::Event::StatusChanged { old, new },
                         )) => {
                             let _ = event_tx.send(NodeEvent::NatStatusChanged { old, new });
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::Relay(
+                            relay::Event::ReservationReqAccepted { src_peer_id, .. },
+                        )) => {
+                            let _ = event_tx.send(NodeEvent::RelayReservationAccepted { src_peer_id });
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::Relay(
+                            relay::Event::CircuitReqAccepted { src_peer_id, dst_peer_id },
+                        )) => {
+                            let _ = event_tx.send(NodeEvent::RelayCircuitAccepted {
+                                src_peer_id,
+                                dst_peer_id,
+                            });
                         }
                         _ => {}
                     }
