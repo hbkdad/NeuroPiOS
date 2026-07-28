@@ -248,6 +248,24 @@ pub fn build_swarm_with_limits(
             })
         })
         .map_err(|e| P2pError::SwarmBuild(e.to_string()))?
+        // libp2p-swarm's default `idle_connection_timeout` is `Duration::ZERO`:
+        // the instant no behaviour handler reports pending work on a
+        // connection, the swarm tears it down with no grace period at all.
+        // For a request/response protocol like Kademlia, the RESPONDER side
+        // can report "no more work" as soon as it has queued its reply,
+        // which races the reply actually being flushed to the socket -- the
+        // connection can close before the bytes go out, silently dropping
+        // an otherwise-correct response. Root-caused via
+        // RUST_LOG=libp2p_kad=trace tracing of a failing 3-node relayed
+        // discovery case (see crates/aion-p2p/README.md): B genuinely
+        // computed and queued a FIND_NODE response
+        // (`InboundRequest { FindNode { num_closer_peers: 1 } }`), but the
+        // B<->C connection closed via `KeepAliveTimeout` ~90ms later, before
+        // the requester ever received it, and the query failed
+        // (`requests: 1, success: 0, failure: 1`). A nonzero grace period
+        // gives in-flight protocol responses time to actually be written
+        // before an idle connection is reclaimed.
+        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(30)))
         .build();
     Ok(swarm)
 }
