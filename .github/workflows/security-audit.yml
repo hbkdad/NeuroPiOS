@@ -1,0 +1,48 @@
+name: Security audit
+
+# Supply-chain visibility for AION's real dependencies, per the security
+# audit run in this session (docs/ROADMAP.md, milestone 26): as of that
+# audit, `cargo audit` reports 5 known vulnerabilities / unmaintained
+# crates, all transitive through libp2p 0.53.2's own dependency tree
+# (ring, rustls-webpki, hickory-proto, instant, paste, lru) -- not
+# something a `cargo update` can fix within libp2p 0.53's own version
+# constraints. `continue-on-error: true` is intentional and temporary:
+# it keeps this job informational (not blocking) until the libp2p 0.53 ->
+# 0.56 upgrade (tracked as the next milestone after this one) actually
+# clears those findings. Once that lands, remove continue-on-error here
+# so a fresh advisory genuinely fails CI.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  cargo-audit:
+    name: cargo audit (Rust dependencies)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
+
+  pip-audit:
+    name: pip-audit (poig_sim dependencies)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - working-directory: simulations/poig_sim
+        run: pip install -e . pip-audit
+      - working-directory: simulations/poig_sim
+        run: pip-audit
