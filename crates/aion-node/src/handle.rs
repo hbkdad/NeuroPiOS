@@ -8,14 +8,10 @@
 //!
 //! Honest scope note: this is a real, working event loop (dial, listen,
 //! gossip subscribe/publish, Kademlia bootstrap-seeding/queries, AutoNAT
-//! status, relay-server activity, and DCUtR hole-punch outcomes, and the
-//! events that matter for those), not a full command surface over every
-//! behaviour this crate wires in -- relay-CLIENT reservation confirmation
-//! isn't surfaced as its own event yet (though `listen_on`/`dial` already
-//! work transparently with `/p2p-circuit` addresses via the generic
-//! commands, and a successful reservation still fires the ordinary
-//! `NewListenAddr` event; see `crates/aion-p2p/tests/circuit_relay.rs`).
-//! It covers what `tests/node_gossip.rs` and `aion-p2p`'s own
+//! status, relay-server AND relay-client activity, and DCUtR hole-punch
+//! outcomes, and the events that matter for those), not a full command
+//! surface over every behaviour this crate wires in. It covers what
+//! `tests/node_gossip.rs` and `aion-p2p`'s own
 //! `kademlia_discovery.rs`/`autonat_reachability.rs`/`circuit_relay.rs`/
 //! `dcutr_hole_punch.rs` already proved work manually, now reachable
 //! without hand-rolling the event loop, and is meant to grow
@@ -99,6 +95,29 @@ pub enum NodeEvent {
     DirectConnectionUpgrade {
         remote_peer_id: PeerId,
         error: Option<String>,
+    },
+    /// This node's OWN reservation request (made via `listen_on` a
+    /// `/p2p-circuit` address) was accepted by the relay named by
+    /// `relay_peer_id`. Complements `RelayReservationAccepted` (which
+    /// fires on the RELAY's own handle) with the confirmation on the
+    /// reserving peer's side -- see `crates/aion-p2p/tests/circuit_relay.rs`'s
+    /// "Phase 1".
+    RelayClientReservationAccepted {
+        relay_peer_id: PeerId,
+    },
+    /// This node, dialing another peer THROUGH a relay (via `dial` a
+    /// `/p2p-circuit` address), established the outbound circuit
+    /// connection -- fires on the DIALING peer's side (e.g. C in
+    /// `crates/aion-p2p/tests/circuit_relay.rs`'s "Phase 2").
+    RelayClientOutboundCircuitEstablished {
+        relay_peer_id: PeerId,
+    },
+    /// This node received an inbound connection from `src_peer_id` THROUGH
+    /// a relay it had reserved on -- fires on the peer being DIALED (e.g.
+    /// A in `circuit_relay.rs`'s "Phase 2"), letting it distinguish a
+    /// relayed inbound connection from a direct one.
+    RelayClientInboundCircuitEstablished {
+        src_peer_id: PeerId,
     },
 }
 
@@ -276,6 +295,25 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                                 remote_peer_id: event.remote_peer_id,
                                 error: event.result.err().map(|e| e.to_string()),
                             });
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::RelayClient(
+                            relay::client::Event::ReservationReqAccepted { relay_peer_id, .. },
+                        )) => {
+                            let _ = event_tx
+                                .send(NodeEvent::RelayClientReservationAccepted { relay_peer_id });
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::RelayClient(
+                            relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. },
+                        )) => {
+                            let _ = event_tx.send(NodeEvent::RelayClientOutboundCircuitEstablished {
+                                relay_peer_id,
+                            });
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::RelayClient(
+                            relay::client::Event::InboundCircuitEstablished { src_peer_id, .. },
+                        )) => {
+                            let _ = event_tx
+                                .send(NodeEvent::RelayClientInboundCircuitEstablished { src_peer_id });
                         }
                         _ => {}
                     }
