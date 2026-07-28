@@ -1,7 +1,7 @@
 # ADR 0002: P2P Stack — rust-libp2p (Tokio)
 
 ## Status
-Accepted, and implemented through milestone 4: `crates/aion-p2p` has a working GossipSub+Identify+Kademlia swarm over TCP+Noise+Yamux, with real two-peer publish/receive and Kademlia FIND_NODE round-trip integration tests, and `crates/aion-node`'s `Node::build_swarm()` now drives a swarm built from the node's own bridged identity (`tests/node_gossip.rs` in `aion-node`). AutoNAT and circuit relay (NAT traversal) and peer-scoring/anti-spam policy remain unimplemented — see `crates/aion-p2p/README.md` for exactly what's done vs. deferred.
+Accepted, and implemented through milestone 5: `crates/aion-p2p` has a working GossipSub+Identify+Kademlia swarm over TCP+Noise+Yamux, with real peer-scoring active on the job-announcements topic (explicit, deliberately-tuned `TopicScoreParams`, not library defaults), two-peer publish/receive, and Kademlia FIND_NODE round-trip integration tests, and `crates/aion-node`'s `Node::build_swarm()` drives a swarm built from the node's own bridged identity (`tests/node_gossip.rs` in `aion-node`). AutoNAT and circuit relay (NAT traversal), connection limits, and 3+ node relayed Kademlia discovery (attempted, root-caused as far as time allowed, documented as a known issue) remain unresolved — see `crates/aion-p2p/README.md` for exactly what's done vs. deferred.
 
 ## Context
 AION's node network needs peer discovery, NAT traversal, gossip-based job/announcement propagation, and a DHT for content/model lookup. The orchestration brief's default hypothesis is Rust + Tokio + rust-libp2p unless research shows a stronger alternative.

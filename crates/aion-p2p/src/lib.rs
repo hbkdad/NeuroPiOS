@@ -72,10 +72,72 @@ pub fn keypair_from_identity(
         .map_err(|e| P2pError::IdentityBridge(e.to_string()))
 }
 
+/// Deliberate, non-default topic scoring parameters for the job-announcements
+/// topic, per docs/adr/0002-p2p-stack.md's requirement that every gossip
+/// topic get an explicit peer-scoring policy, not library defaults left
+/// untouched. Values are a documented starting point -- like every other
+/// weight/threshold in this codebase (see docs/POIG-SPEC.md's equivalent
+/// caveat), they need real-network-data tuning before being treated as
+/// production-final, not assumed correct because they compile.
+pub fn job_announcements_topic_score_params() -> gossipsub::TopicScoreParams {
+    gossipsub::TopicScoreParams {
+        topic_weight: 1.0,
+        // P1: reward peers who have been meshed in longer -- a crude but
+        // real Sybil-resistance signal (fresh identities can't instantly
+        // accrue mesh tenure), consistent with docs/VERIFICATION.md's
+        // "new/unproven identities get less trust" principle.
+        time_in_mesh_weight: 1.0,
+        time_in_mesh_quantum: Duration::from_secs(1),
+        time_in_mesh_cap: 300.0, // caps out after 5 minutes of good standing
+        // P2: reward peers who are first to deliver a valid message --
+        // rewards genuinely well-connected/useful relayers.
+        first_message_deliveries_weight: 1.0,
+        first_message_deliveries_decay: 0.5,
+        first_message_deliveries_cap: 50.0,
+        // P3: penalize a meshed peer who isn't actually delivering
+        // messages promptly (a peer that joined the mesh but free-rides
+        // or withholds traffic). Activation delay avoids punishing a peer
+        // in its first few seconds of membership.
+        mesh_message_deliveries_weight: -1.0,
+        mesh_message_deliveries_decay: 0.5,
+        mesh_message_deliveries_cap: 50.0,
+        mesh_message_deliveries_threshold: 5.0,
+        mesh_message_deliveries_window: Duration::from_millis(500),
+        mesh_message_deliveries_activation: Duration::from_secs(10),
+        // P3b: sticky penalty for peers pruned while under-delivering --
+        // discourages "join, do nothing, get pruned, immediately rejoin."
+        mesh_failure_penalty_weight: -1.0,
+        mesh_failure_penalty_decay: 0.5,
+        // P4: the core anti-spam signal -- publishing invalid/malformed
+        // job-announcement messages is penalized quadratically, so a
+        // handful of mistakes are forgiven but sustained spam compounds
+        // fast.
+        invalid_message_deliveries_weight: -20.0,
+        invalid_message_deliveries_decay: 0.3,
+    }
+}
+
+/// Peer-score parameters and thresholds for the whole `AionBehaviour`
+/// GossipSub instance. `app_specific_weight` is left available for
+/// `crates/aion-reputation` to plug AION's own multi-dimensional
+/// reputation score (docs/security/THREAT-MODEL.md) into gossipsub's
+/// scoring in a later phase -- not wired yet, since that reputation store
+/// doesn't exist as real Rust code outside the Phase 2 Python simulator.
+pub fn build_peer_score_params() -> (gossipsub::PeerScoreParams, gossipsub::PeerScoreThresholds) {
+    let mut params = gossipsub::PeerScoreParams::default();
+    params.topics.insert(
+        Topic::new(JOB_ANNOUNCEMENTS_TOPIC).0.hash(),
+        job_announcements_topic_score_params(),
+    );
+    (params, gossipsub::PeerScoreThresholds::default())
+}
+
 /// Builds a GossipSub behaviour with sane, explicit defaults (message
 /// signing required -- anonymous/unsigned gossip is not permitted, since
 /// every AION gossip message should be attributable to a peer for the
-/// anti-spam/reputation layers described in docs/security/THREAT-MODEL.md).
+/// anti-spam/reputation layers described in docs/security/THREAT-MODEL.md)
+/// and real peer-scoring activated (not left as library defaults) per
+/// docs/adr/0002-p2p-stack.md's anti-spam requirement.
 pub fn build_gossipsub(keypair: &identity::Keypair) -> Result<gossipsub::Behaviour, P2pError> {
     let gossipsub_config = gossipsub::ConfigBuilder::default()
         .heartbeat_interval(Duration::from_secs(1))
@@ -83,11 +145,18 @@ pub fn build_gossipsub(keypair: &identity::Keypair) -> Result<gossipsub::Behavio
         .build()
         .map_err(|e| P2pError::GossipsubBuild(e.to_string()))?;
 
-    gossipsub::Behaviour::new(
+    let mut behaviour = gossipsub::Behaviour::new(
         gossipsub::MessageAuthenticity::Signed(keypair.clone()),
         gossipsub_config,
     )
-    .map_err(|e| P2pError::GossipsubBuild(e.to_string()))
+    .map_err(|e| P2pError::GossipsubBuild(e.to_string()))?;
+
+    let (score_params, score_thresholds) = build_peer_score_params();
+    behaviour
+        .with_peer_score(score_params, score_thresholds)
+        .map_err(P2pError::GossipsubBuild)?;
+
+    Ok(behaviour)
 }
 
 pub fn build_identify(keypair: &identity::Keypair) -> identify::Behaviour {
@@ -97,11 +166,26 @@ pub fn build_identify(keypair: &identity::Keypair) -> identify::Behaviour {
     ))
 }
 
+/// Builds Kademlia in **server mode** (`kad::Mode::Server`) explicitly,
+/// rather than relying on the library default (`Mode::Client`, which only
+/// switches to server mode automatically once an external address is
+/// confirmed -- e.g. via AutoNAT, which this crate doesn't implement yet,
+/// see the module doc). A client-mode node issues queries but silently
+/// refuses to answer other peers' FIND_NODE requests (its handler denies
+/// the inbound substream upgrade outright), which would make every AION
+/// node a DHT free-rider and break discovery entirely. AION nodes are
+/// expected to be reachable compute/storage/validator participants, so
+/// defaulting to server mode is the correct choice here -- a node that
+/// truly can't accept inbound connections (e.g. behind a NAT with no port
+/// forwarding) is a separate, real problem that AutoNAT/relay (still
+/// deferred) will need to solve, not something this default should mask.
 pub fn build_kademlia(local_peer_id: PeerId) -> kad::Behaviour<kad::store::MemoryStore> {
     let store = kad::store::MemoryStore::new(local_peer_id);
     let mut config = kad::Config::default();
     config.set_protocol_names(vec![libp2p::StreamProtocol::new(KADEMLIA_PROTOCOL_NAME)]);
-    kad::Behaviour::with_config(local_peer_id, store, config)
+    let mut behaviour = kad::Behaviour::with_config(local_peer_id, store, config);
+    behaviour.set_mode(Some(kad::Mode::Server));
+    behaviour
 }
 
 /// Builds a fully wired TCP+Noise+Yamux swarm with the AION behaviour set
@@ -178,9 +262,44 @@ mod tests {
     }
 
     #[test]
-    fn gossipsub_behaviour_builds_successfully() {
+    fn gossipsub_behaviour_builds_successfully_with_peer_scoring_active() {
         let keypair = identity::Keypair::generate_ed25519();
         assert!(build_gossipsub(&keypair).is_ok());
+    }
+
+    #[test]
+    fn peer_score_params_are_valid_per_gossipsubs_own_validation() {
+        let (params, thresholds) = build_peer_score_params();
+        assert!(params.validate().is_ok());
+        assert!(thresholds.validate().is_ok());
+    }
+
+    #[test]
+    fn job_announcements_topic_has_explicit_non_default_scoring_not_left_as_library_defaults() {
+        let configured = job_announcements_topic_score_params();
+        let library_default = gossipsub::TopicScoreParams::default();
+        // The point of this crate's peer-scoring work is that every topic
+        // gets a DELIBERATE policy, per docs/adr/0002-p2p-stack.md -- not
+        // that gossipsub's library defaults happen to be used untouched.
+        assert_ne!(
+            configured.invalid_message_deliveries_weight,
+            library_default.invalid_message_deliveries_weight,
+            "job-announcements topic should have a deliberately-tuned anti-spam penalty, not the library default"
+        );
+        // Sign/direction sanity per gossipsub's own documented invariants:
+        // reward weights must be >= 0, penalty weights must be <= 0.
+        assert!(configured.time_in_mesh_weight >= 0.0);
+        assert!(configured.first_message_deliveries_weight >= 0.0);
+        assert!(configured.mesh_message_deliveries_weight <= 0.0);
+        assert!(configured.mesh_failure_penalty_weight <= 0.0);
+        assert!(configured.invalid_message_deliveries_weight <= 0.0);
+    }
+
+    #[test]
+    fn build_peer_score_params_registers_the_job_announcements_topic_specifically() {
+        let (params, _) = build_peer_score_params();
+        let topic_hash = Topic::new(JOB_ANNOUNCEMENTS_TOPIC).0.hash();
+        assert!(params.topics.contains_key(&topic_hash));
     }
 
     #[test]
