@@ -9,6 +9,7 @@ members = [
     "crates/aion-crypto",
     "crates/aion-node",
     "crates/aion-p2p",
+    "crates/aion-verifier",
 ]
 
 [workspace.package]
