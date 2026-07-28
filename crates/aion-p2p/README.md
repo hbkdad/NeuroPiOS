@@ -2,7 +2,7 @@
 
 rust-libp2p wrapper per `docs/adr/0002-p2p-stack.md`.
 
-**Status: real implementation, milestone 5.** `cargo test -p aion-p2p` → 10/10 passing (8 unit + 2 real network integration tests):
+**Status: real implementation, milestone 6.** `cargo test -p aion-p2p` → 12/12 passing (8 unit + 4 real network integration tests):
 
 - **GossipSub** pub/sub over real TCP+Noise+Yamux, message signing required (`ValidationMode::Strict`, `MessageAuthenticity::Signed`) — anonymous/unsigned gossip is not permitted, since every AION gossip message must be attributable to a peer for the anti-spam/reputation layers in `docs/security/THREAT-MODEL.md`. **Peer scoring is active** (`with_peer_score`, milestone 5), with an explicit, deliberately-tuned `TopicScoreParams` for the job-announcements topic (`job_announcements_topic_score_params`) — not left as unconfigured library defaults, per `docs/adr/0002-p2p-stack.md`'s requirement that every gossip topic get its own anti-spam policy. Rewards mesh tenure and first-message delivery; penalizes under-delivery and (heavily, quadratically) invalid messages. Values are a documented starting point, not yet tuned against real network data — same caveat as every other weight in this codebase (see `docs/POIG-SPEC.md`).
 - **Identify**, wired in alongside GossipSub and Kademlia via a combined `AionBehaviour` (`#[derive(NetworkBehaviour)]`).
@@ -10,11 +10,12 @@ rust-libp2p wrapper per `docs/adr/0002-p2p-stack.md`.
 - **Identity bridging**: `keypair_from_identity` constructs a `libp2p::identity::Keypair` from the exact same Ed25519 key material as an `aion_crypto::Identity` (verified by a test that checks the raw public-key bytes match, not just that the derivation is deterministic) — a node's P2P PeerID is genuinely the same key as its `aion_crypto::Identity`, not two unrelated keys.
 - `tests/gossip_roundtrip.rs` — two independent swarms, real TCP loopback connection, manual dial, one peer's published message is actually received by the other, byte-for-byte (~0.5s), with peer scoring active throughout.
 - `tests/kademlia_discovery.rs` — a real Kademlia FIND_NODE request/response round-trips successfully end-to-end over `/aion/kad/0.1.0`. Honestly scoped: in this 2-node network the response legitimately comes back empty (a FIND_NODE responder returns peers from its own routing table closer than itself, and a fresh 2-node network has none yet) — what's proven is the protocol round-trip works, not that discovery finds anyone in a network this small.
+- **Connection limits** (`connection_limits::Behaviour`, milestone 6), wired into `AionBehaviour` with explicit, documented defaults (`default_connection_limits`) covering pending/established/per-peer/total caps — `max_established_incoming` is deliberately capped independently from the other limits to prevent an eclipse attack, per the underlying behaviour's own documented recommendation. `build_swarm_with_limits` lets a caller (tests today, `aion-node`'s operator-configured resource caps later) override the defaults. `tests/connection_limits.rs` proves real enforcement: a peer configured with zero allowed inbound connections actually rejects a live dial attempt (`SwarmEvent::IncomingConnectionError`), with a control test confirming the same dial succeeds against a peer with normal limits.
 
 **Not yet done (explicitly deferred, not hidden):**
 - **AutoNAT / circuit relay** (NAT traversal) — not implemented; peers currently need directly dialable addresses.
-- **Connection limits** — peer-scoring is active but the `libp2p_connection_limits` behaviour is not yet added to `AionBehaviour`; a peer could still open unbounded connections before scoring has a chance to catch up.
 - **`app_specific_weight`** in peer scoring is unused — reserved for `crates/aion-reputation`'s multi-dimensional reputation score to plug in once that crate exists as real Rust (currently only the Phase 2 Python simulator).
+- Connection limits are not yet wired to `aion-node`'s `ResourceCaps` (Node Safety) — a node's configured bandwidth/resource caps and its P2P connection limits are still two independent, unconnected knobs.
 - 3+ node relayed Kademlia discovery — see the Known Issue below.
 
 ## Known issue: 3-node relayed Kademlia discovery (attempted, not working, milestone 4)

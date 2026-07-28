@@ -12,7 +12,7 @@
 //! that happen to both be called "identity".
 
 use libp2p::{
-    gossipsub, identify, identity, kad, noise,
+    connection_limits, gossipsub, identify, identity, kad, noise,
     swarm::{NetworkBehaviour, Swarm},
     tcp, yamux, Multiaddr, PeerId,
 };
@@ -34,6 +34,7 @@ pub struct AionBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub identify: identify::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
+    pub connection_limits: connection_limits::Behaviour,
 }
 
 pub const IDENTIFY_PROTOCOL_VERSION: &str = "/aion/identify/0.1.0";
@@ -188,10 +189,43 @@ pub fn build_kademlia(local_peer_id: PeerId) -> kad::Behaviour<kad::store::Memor
     behaviour
 }
 
+/// Conservative default connection limits, per docs/adr/0002-p2p-stack.md's
+/// anti-spam requirement and docs/ARCHITECTURE.md's Node Safety principle
+/// extended to network resources, not just CPU/memory/storage: a node
+/// never accepts unbounded connections just because gossipsub/kademlia
+/// alone don't cap them. `max_established_incoming` is set independently
+/// from the outgoing/per-peer/total caps specifically to prevent an
+/// eclipse attack (an adversary surrounding a node with only inbound
+/// connections it controls) -- per this behaviour's own documented
+/// recommendation. These are starting values, not tuned against real
+/// network load; see the same tunable-not-final caveat that applies to
+/// every other weight/threshold in this codebase.
+pub fn default_connection_limits() -> connection_limits::ConnectionLimits {
+    connection_limits::ConnectionLimits::default()
+        .with_max_pending_incoming(Some(30))
+        .with_max_pending_outgoing(Some(30))
+        .with_max_established_incoming(Some(100))
+        .with_max_established_outgoing(Some(100))
+        .with_max_established_per_peer(Some(4))
+        .with_max_established(Some(200))
+}
+
 /// Builds a fully wired TCP+Noise+Yamux swarm with the AION behaviour set
-/// (GossipSub + Identify + Kademlia). This is the entry point
-/// `crates/aion-node` uses to actually start a node's P2P layer.
+/// (GossipSub + Identify + Kademlia + connection limits) and the default
+/// connection limits above. This is the entry point `crates/aion-node`
+/// uses to actually start a node's P2P layer.
 pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<AionBehaviour>, P2pError> {
+    build_swarm_with_limits(keypair, default_connection_limits())
+}
+
+/// Same as `build_swarm`, but with caller-supplied connection limits --
+/// exists so tests (and, later, `aion-node`'s operator-configured
+/// resource caps) can override the defaults rather than being stuck with
+/// them.
+pub fn build_swarm_with_limits(
+    keypair: identity::Keypair,
+    limits: connection_limits::ConnectionLimits,
+) -> Result<Swarm<AionBehaviour>, P2pError> {
     let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_tcp(
@@ -205,10 +239,12 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<AionBehaviour>, P
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             let identify = build_identify(key);
             let kademlia = build_kademlia(PeerId::from(key.public()));
+            let connection_limits = connection_limits::Behaviour::new(limits);
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(AionBehaviour {
                 gossipsub,
                 identify,
                 kademlia,
+                connection_limits,
             })
         })
         .map_err(|e| P2pError::SwarmBuild(e.to_string()))?

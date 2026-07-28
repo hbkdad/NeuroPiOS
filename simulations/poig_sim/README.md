@@ -1,6 +1,6 @@
 # poig_sim — AION Phase 2 Economic Simulator
 
-The first executable proof-of-concept for AION's PoIG (Proof of Intelligence Gain) reward mechanism, per `docs/ROADMAP.md` Phase 2 ("local simulator, no blockchain"). Implements the logic specified in `docs/POIG-SPEC.md` and `docs/ECONOMIC-MODEL.md`, and exercises five attack scenarios from `docs/security/ECONOMIC-ATTACKS.md`.
+The first executable proof-of-concept for AION's PoIG (Proof of Intelligence Gain) reward mechanism, per `docs/ROADMAP.md` Phase 2 ("local simulator, no blockchain"). Implements the logic specified in `docs/POIG-SPEC.md` and `docs/ECONOMIC-MODEL.md`, and exercises six attack scenarios from `docs/security/ECONOMIC-ATTACKS.md`.
 
 ## What this is
 An in-memory (no network, no chain, no real inference) model of:
@@ -10,6 +10,7 @@ An in-memory (no network, no chain, no real inference) model of:
 - Commit/reveal multi-validator quorum aggregation (`poig_sim/quorum.py`), per the L6 tier and anti-copy-voting requirement in `docs/VERIFICATION.md`.
 - The deterministic Routing Score (`poig_sim/routing.py`), per `docs/ARCHITECTURE.md`.
 - The PoIG reward formula and its `UsefulWorkScore` anti-farming gate (`poig_sim/poig.py`).
+- A hidden/rotating benchmark model with rate limiting (`poig_sim/benchmark.py`), per `docs/PROTOCOL.md`'s Benchmark object anti-leakage policy.
 - A minimal job market / actor simulation (`poig_sim/market.py`).
 - A Monte Carlo scale sweep (`scale_sweep.py`) measuring how the market simulation actually performs at increasing node counts.
 
@@ -21,7 +22,7 @@ Not a P2P network, not a blockchain, not connected to any real inference runtime
 ```
 cd simulations/poig_sim
 pip install -e .
-pytest -q                 # 14 tests
+pytest -q                 # 19 tests
 python scale_sweep.py     # Monte Carlo scale sweep, prints measured timing
 ```
 
@@ -32,6 +33,7 @@ python scale_sweep.py     # Monte Carlo scale sweep, prints measured timing
 - `tests/test_sybil_cluster.py` — a cluster of freshly-created identities issuing each other low-value jobs to bootstrap reputation cannot out-earn an established honest worker of equal real output, because new identities face the verification-rate floor at its maximum and contribute no real external demand signal.
 - `tests/test_validator_collusion.py` — commit/reveal prevents vote-copying; a **minority** colluding validator cluster cannot flip a quorum outcome; a **majority** colluding cluster *can* (honestly documented as a real residual risk, not hidden).
 - `tests/test_price_manipulation.py` — a worker that manipulates only its price signal cannot outscore an established honest worker on routing, and single-signal leverage is mathematically capped at that signal's own configured weight share.
+- `tests/test_benchmark_leakage.py` — a real aggregate-score-only bit-flip probing attack fully recovers a hidden 30-item benchmark answer key when unmitigated (100% accuracy, proving the attack is real), but rate limiting + rotation together keep the same attacker's final accuracy well below full recovery (chance-level, typically 25-70% across tested seeds) by rotating the answer key out from under them before they can complete the probe.
 
 ## Scale sweep results
 

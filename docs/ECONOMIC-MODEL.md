@@ -25,12 +25,13 @@ Exact percentages are simulation outputs (see below), not fixed here — publish
 `simulations/poig_sim` (Python) implements:
 - A node population with configurable actor mix: honest worker, cheap/low-effort worker, premium worker, malicious/self-dealing worker, Sybil cluster, and (in `quorum.py`) colluding validator clusters.
 - A minimal job market (signed job creation, escrow, worker assignment, verification-tier application, PoIG reward calculation, reputation update).
-- Five concrete attack scenarios with assertions, run via `pytest` (14 tests, all passing as of milestone 2):
+- Six concrete attack scenarios with assertions, run via `pytest` (19 tests, all passing as of milestone 6):
   1. **Self-dealing / fake-demand reward farming** — an actor creates jobs paid to itself with no real escrow-backed external demand; asserts `UsefulWorkScore` (and therefore `Reward`) stays at 0.
   2. **Sybil cluster reputation farming** — many newly-created identities attempt to bootstrap reputation via mutually-issued low-value jobs; asserts the reputation-gating + adaptive-verification-rate design (new/unproven identities get maximum-rate verification) keeps their effective payout at or below the honest-worker baseline.
   3. **Validator collusion (minority)** — blocked by weighted quorum aggregation.
   4. **Validator collusion (majority)** — succeeds; honestly documented as a real residual risk rather than hidden (see `docs/security/ECONOMIC-ATTACKS.md`).
   5. **Price manipulation** — a routing-score-gaming worker maxing only its price signal cannot outscore an established honest worker; single-signal leverage is proven mathematically bounded by that signal's own weight share.
+  6. **Benchmark leakage** — an aggregate-score-only bit-flip probing attack fully recovers a hidden benchmark's answer key when unmitigated (proving the attack is real), but rate limiting + rotation keep the same attack at chance-level accuracy by invalidating accumulated probe knowledge before it can complete.
 - A **Monte Carlo scale sweep** (`simulations/poig_sim/scale_sweep.py`) run at 100 / 1,000 / 10,000 / 100,000 actors — the full range specified in the orchestration brief — completing in ~7.6s wall-clock in this environment, with the `UsefulWorkScore` self-dealing gate confirmed to hold (`0.0` reward to the malicious pool) at every scale. See `simulations/poig_sim/README.md` for the actual measured output. This validates the economic logic's correctness and computational scaling; it does not simulate real P2P/consensus/settlement latency, which doesn't exist yet (Phases 3+).
 
 ## Economic attack surface
