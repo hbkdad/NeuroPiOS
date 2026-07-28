@@ -1,7 +1,9 @@
 //! AION P2P networking, per docs/adr/0002-p2p-stack.md: rust-libp2p on
-//! Tokio. GossipSub (job/announcement propagation), Identify, and
-//! Kademlia (peer discovery) over TCP+Noise+Yamux. AutoNAT and circuit
-//! relay (NAT traversal) are still deferred to a follow-up.
+//! Tokio. GossipSub (job/announcement propagation), Identify, Kademlia
+//! (peer discovery), and AutoNAT (reachability detection) over
+//! TCP+Noise+Yamux. Circuit relay (the actual NAT-traversal transport, as
+//! opposed to AutoNAT's detection-only role) is still deferred to a
+//! follow-up.
 //!
 //! The P2P identity keypair can be either a fresh libp2p-generated Ed25519
 //! key (`identity::Keypair::generate_ed25519()`) or bridged from an
@@ -12,7 +14,7 @@
 //! that happen to both be called "identity".
 
 use libp2p::{
-    connection_limits, gossipsub, identify, identity, kad, noise,
+    autonat, connection_limits, gossipsub, identify, identity, kad, noise,
     swarm::{NetworkBehaviour, Swarm},
     tcp, yamux, Multiaddr, PeerId,
 };
@@ -35,6 +37,7 @@ pub struct AionBehaviour {
     pub identify: identify::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
     pub connection_limits: connection_limits::Behaviour,
+    pub autonat: autonat::Behaviour,
 }
 
 pub const IDENTIFY_PROTOCOL_VERSION: &str = "/aion/identify/0.1.0";
@@ -189,6 +192,30 @@ pub fn build_kademlia(local_peer_id: PeerId) -> kad::Behaviour<kad::store::Memor
     behaviour
 }
 
+/// AutoNAT's production default `Config`: `only_global_ips: true` (the
+/// correct setting for real internet-facing nodes -- a private/loopback
+/// address should never be treated as evidence of public reachability).
+/// Tests that run entirely over `127.0.0.1` must override this (see
+/// `tests/autonat_reachability.rs`) since a real deployment's assumption
+/// doesn't hold on loopback -- that override is a test-environment
+/// necessity, not a relaxation of the production default.
+pub fn default_autonat_config() -> autonat::Config {
+    autonat::Config::default()
+}
+
+/// Builds AutoNAT (per docs/adr/0002-p2p-stack.md's still-deferred NAT
+/// item, now started): a single `autonat::Behaviour` acts as BOTH a
+/// dial-back-requesting client (to learn whether the local node's own
+/// address is publicly reachable) and a dial-back-performing server (to
+/// help other peers learn the same about themselves) -- this dual role is
+/// the library's own design, not an AION-specific simplification. This is
+/// reachability DETECTION only; it does not itself provide a NAT-traversal
+/// transport (that's circuit relay, still not implemented -- see the
+/// crate-level module doc and README's "Not yet done" section).
+pub fn build_autonat(local_peer_id: PeerId, config: autonat::Config) -> autonat::Behaviour {
+    autonat::Behaviour::new(local_peer_id, config)
+}
+
 /// Conservative default connection limits, per docs/adr/0002-p2p-stack.md's
 /// anti-spam requirement and docs/ARCHITECTURE.md's Node Safety principle
 /// extended to network resources, not just CPU/memory/storage: a node
@@ -211,9 +238,9 @@ pub fn default_connection_limits() -> connection_limits::ConnectionLimits {
 }
 
 /// Builds a fully wired TCP+Noise+Yamux swarm with the AION behaviour set
-/// (GossipSub + Identify + Kademlia + connection limits) and the default
-/// connection limits above. This is the entry point `crates/aion-node`
-/// uses to actually start a node's P2P layer.
+/// (GossipSub + Identify + Kademlia + connection limits + AutoNAT) and the
+/// default connection limits and AutoNAT config above. This is the entry
+/// point `crates/aion-node` uses to actually start a node's P2P layer.
 pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<AionBehaviour>, P2pError> {
     build_swarm_with_limits(keypair, default_connection_limits())
 }
@@ -221,10 +248,24 @@ pub fn build_swarm(keypair: identity::Keypair) -> Result<Swarm<AionBehaviour>, P
 /// Same as `build_swarm`, but with caller-supplied connection limits --
 /// exists so tests (and, later, `aion-node`'s operator-configured
 /// resource caps) can override the defaults rather than being stuck with
-/// them.
+/// them. Uses the production-default AutoNAT config; see
+/// `build_swarm_with_limits_and_autonat_config` to override that too.
 pub fn build_swarm_with_limits(
     keypair: identity::Keypair,
     limits: connection_limits::ConnectionLimits,
+) -> Result<Swarm<AionBehaviour>, P2pError> {
+    build_swarm_with_limits_and_autonat_config(keypair, limits, default_autonat_config())
+}
+
+/// Same as `build_swarm_with_limits`, but also with a caller-supplied
+/// AutoNAT config -- exists specifically so loopback-only integration
+/// tests can set `only_global_ips: false` (see
+/// `tests/autonat_reachability.rs`) without weakening the production
+/// default that every other caller gets.
+pub fn build_swarm_with_limits_and_autonat_config(
+    keypair: identity::Keypair,
+    limits: connection_limits::ConnectionLimits,
+    autonat_config: autonat::Config,
 ) -> Result<Swarm<AionBehaviour>, P2pError> {
     let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
@@ -238,13 +279,16 @@ pub fn build_swarm_with_limits(
             let gossipsub = build_gossipsub(key)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             let identify = build_identify(key);
-            let kademlia = build_kademlia(PeerId::from(key.public()));
+            let local_peer_id = PeerId::from(key.public());
+            let kademlia = build_kademlia(local_peer_id);
             let connection_limits = connection_limits::Behaviour::new(limits);
+            let autonat = build_autonat(local_peer_id, autonat_config);
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(AionBehaviour {
                 gossipsub,
                 identify,
                 kademlia,
                 connection_limits,
+                autonat,
             })
         })
         .map_err(|e| P2pError::SwarmBuild(e.to_string()))?
