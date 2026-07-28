@@ -1,6 +1,6 @@
 # poig_sim — AION Phase 2 Economic Simulator
 
-The first executable proof-of-concept for AION's PoIG (Proof of Intelligence Gain) reward mechanism, per `docs/ROADMAP.md` Phase 2 ("local simulator, no blockchain"). Implements the logic specified in `docs/POIG-SPEC.md` and `docs/ECONOMIC-MODEL.md`, and exercises six attack scenarios from `docs/security/ECONOMIC-ATTACKS.md`.
+The first executable proof-of-concept for AION's PoIG (Proof of Intelligence Gain) reward mechanism, per `docs/ROADMAP.md` Phase 2 ("local simulator, no blockchain"). Implements the logic specified in `docs/POIG-SPEC.md` and `docs/ECONOMIC-MODEL.md`, and exercises seven attack scenarios from `docs/security/ECONOMIC-ATTACKS.md`.
 
 ## What this is
 An in-memory (no network, no chain, no real inference) model of:
@@ -22,7 +22,7 @@ Not a P2P network, not a blockchain, not connected to any real inference runtime
 ```
 cd simulations/poig_sim
 pip install -e .
-pytest -q                 # 19 tests
+pytest -q                 # 22 tests
 python scale_sweep.py     # Monte Carlo scale sweep, prints measured timing
 ```
 
@@ -34,6 +34,7 @@ python scale_sweep.py     # Monte Carlo scale sweep, prints measured timing
 - `tests/test_validator_collusion.py` — commit/reveal prevents vote-copying; a **minority** colluding validator cluster cannot flip a quorum outcome; a **majority** colluding cluster *can* (honestly documented as a real residual risk, not hidden).
 - `tests/test_price_manipulation.py` — a worker that manipulates only its price signal cannot outscore an established honest worker on routing, and single-signal leverage is mathematically capped at that signal's own configured weight share.
 - `tests/test_benchmark_leakage.py` — a real aggregate-score-only bit-flip probing attack fully recovers a hidden 30-item benchmark answer key when unmitigated (100% accuracy, proving the attack is real), but rate limiting + rotation together keep the same attacker's final accuracy well below full recovery (chance-level, typically 25-70% across tested seeds) by rotating the answer key out from under them before they can complete the probe.
+- `tests/test_stake_concentration.py` — a 2-of-10 headcount-minority validator cluster with concentrated stake (weight 40 vs. the honest majority's 8) dominates a quorum outcome, while the identical headcount split under equal weights does not; a weight sweep confirms the flip point tracks the whales' aggregate weight share crossing 50%, not their headcount — weight, not headcount, is the real security parameter, and this remains a genuinely open design gap (not resolved by quorum weighting alone).
 
 ## Scale sweep results
 
