@@ -74,9 +74,12 @@ version = "0.1.0"
 dependencies = [
  "aion-crypto",
  "aion-p2p",
+ "aion-storage",
+ "cid",
  "futures",
  "libp2p",
  "sysinfo",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
 ]

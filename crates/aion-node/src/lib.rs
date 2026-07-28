@@ -2,11 +2,13 @@
 //! mandatory resource-safety caps. See docs/ARCHITECTURE.md's Node
 //! Architecture and Node Safety sections.
 
+pub mod capped_storage;
 pub mod handle;
 pub mod hardware;
 pub mod resource_caps;
 pub mod roles;
 
+pub use capped_storage::{CappedContentStore, CappedStorageError};
 pub use handle::{NodeEvent, NodeHandle};
 pub use hardware::HardwareProfile;
 pub use resource_caps::ResourceCaps;

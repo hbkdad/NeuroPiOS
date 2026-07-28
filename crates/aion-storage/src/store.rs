@@ -105,6 +105,21 @@ impl ContentStore {
     pub fn root(&self) -> &Path {
         &self.root
     }
+
+    /// Total bytes currently occupied by this store's contents -- a real
+    /// filesystem measurement (sums each stored file's actual on-disk
+    /// size), not an estimate or a running counter that could drift from
+    /// reality. Used by callers (e.g. `crates/aion-node`'s resource-cap
+    /// gating) that need to know actual current usage before deciding
+    /// whether a new `put` should be allowed.
+    pub fn disk_usage_bytes(&self) -> Result<u64, StorageError> {
+        let mut total = 0u64;
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            total += entry.metadata()?.len();
+        }
+        Ok(total)
+    }
 }
 
 #[cfg(test)]
@@ -199,5 +214,22 @@ mod tests {
         // and it's actually usable, not just present:
         let cid = store.put(b"works after creation").unwrap();
         assert_eq!(store.get(&cid).unwrap(), b"works after creation");
+    }
+
+    #[test]
+    fn disk_usage_bytes_is_a_real_sum_of_stored_content_not_an_estimate() {
+        let (store, _dir) = open_temp_store();
+        assert_eq!(store.disk_usage_bytes().unwrap(), 0);
+
+        store.put(b"12345").unwrap(); // 5 bytes
+        assert_eq!(store.disk_usage_bytes().unwrap(), 5);
+
+        store.put(b"1234567890").unwrap(); // +10 bytes, distinct content
+        assert_eq!(store.disk_usage_bytes().unwrap(), 15);
+
+        // Storing the SAME content again is idempotent (same CID, same
+        // file overwritten) -- usage must not double-count it.
+        store.put(b"12345").unwrap();
+        assert_eq!(store.disk_usage_bytes().unwrap(), 15);
     }
 }
