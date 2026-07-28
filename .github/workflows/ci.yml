@@ -7,7 +7,7 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -36,9 +36,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: install poig_sim
+      - name: install poig_sim (with dev extras, for pytest)
         working-directory: simulations/poig_sim
-        run: pip install -e .
+        run: pip install -e ".[dev]"
       - name: pytest -q
         working-directory: simulations/poig_sim
         run: pytest -q

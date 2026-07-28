@@ -268,7 +268,11 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                             if let Some(target) = target {
                                 let _ = event_tx.send(NodeEvent::ClosestPeersFound {
                                     target,
-                                    peers: ok.peers,
+                                    // libp2p 0.56 enriches GetClosestPeersOk::peers from
+                                    // Vec<PeerId> to Vec<PeerInfo> (peer_id + known addrs).
+                                    // NodeEvent::ClosestPeersFound's contract is unchanged
+                                    // (just the peer IDs), so map the enrichment away here.
+                                    peers: ok.peers.into_iter().map(|info| info.peer_id).collect(),
                                 });
                             }
                         }

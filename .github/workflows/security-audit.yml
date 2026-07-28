@@ -1,20 +1,23 @@
 name: Security audit
 
-# Supply-chain visibility for AION's real dependencies, per the security
-# audit run in this session (docs/ROADMAP.md, milestone 26): as of that
-# audit, `cargo audit` reports 5 known vulnerabilities / unmaintained
-# crates, all transitive through libp2p 0.53.2's own dependency tree
-# (ring, rustls-webpki, hickory-proto, instant, paste, lru) -- not
-# something a `cargo update` can fix within libp2p 0.53's own version
-# constraints. `continue-on-error: true` is intentional and temporary:
-# it keeps this job informational (not blocking) until the libp2p 0.53 ->
-# 0.56 upgrade (tracked as the next milestone after this one) actually
-# clears those findings. Once that lands, remove continue-on-error here
-# so a fresh advisory genuinely fails CI.
+# Supply-chain visibility for AION's real dependencies. Milestone 26's
+# audit found `cargo audit` reporting 5 known vulnerabilities/unmaintained
+# crates, all transitive through libp2p 0.53.2's own dependency tree.
+# Milestone 27 upgraded libp2p 0.53 -> 0.56, which cleared 3 of those 5
+# (ring, rustls-webpki, instant, lru -- all bumped to fixed versions
+# transitively). Two residuals remain, both still genuinely out of this
+# project's control: `hickory-proto` (libp2p-mdns pins `^0.25.2`, but the
+# fix is >=0.26.1 -- confirmed via `cargo update -p hickory-proto
+# --precise 0.26.1` failing with a version-conflict error) and `paste`
+# (pinned transitively via `netlink-packet-core`, still unmaintained
+# upstream). `continue-on-error: true` stays intentional: both residuals
+# are tracked, real, and not fixable by a version bump on our side right
+# now -- revisit when a future libp2p release loosens the `hickory-proto`
+# constraint.
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -43,6 +46,6 @@ jobs:
         with:
           python-version: "3.11"
       - working-directory: simulations/poig_sim
-        run: pip install -e . pip-audit
+        run: pip install -e ".[dev]" pip-audit
       - working-directory: simulations/poig_sim
         run: pip-audit

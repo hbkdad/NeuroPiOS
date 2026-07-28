@@ -205,8 +205,7 @@ pub fn build_identify(keypair: &identity::Keypair) -> identify::Behaviour {
 /// deferred) will need to solve, not something this default should mask.
 pub fn build_kademlia(local_peer_id: PeerId) -> kad::Behaviour<kad::store::MemoryStore> {
     let store = kad::store::MemoryStore::new(local_peer_id);
-    let mut config = kad::Config::default();
-    config.set_protocol_names(vec![libp2p::StreamProtocol::new(KADEMLIA_PROTOCOL_NAME)]);
+    let config = kad::Config::new(libp2p::StreamProtocol::new(KADEMLIA_PROTOCOL_NAME));
     let mut behaviour = kad::Behaviour::with_config(local_peer_id, store, config);
     behaviour.set_mode(Some(kad::Mode::Server));
     behaviour

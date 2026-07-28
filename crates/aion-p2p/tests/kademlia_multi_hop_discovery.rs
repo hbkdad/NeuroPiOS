@@ -128,7 +128,9 @@ async fn c_discovers_a_via_b_without_ever_dialing_a_directly() {
                             ..
                         },
                     )) => {
-                        discovered_peers = ok.peers.clone();
+                        // libp2p 0.56 enriches GetClosestPeersOk::peers from
+                        // Vec<PeerId> to Vec<PeerInfo> (peer_id + known addrs).
+                        discovered_peers = ok.peers.iter().map(|info| info.peer_id).collect();
                         query_succeeded = true;
                     }
                     _ => {}
