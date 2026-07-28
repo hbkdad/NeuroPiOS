@@ -1,6 +1,6 @@
 # poig_sim — AION Phase 2 Economic Simulator
 
-The first executable proof-of-concept for AION's PoIG (Proof of Intelligence Gain) reward mechanism, per `docs/ROADMAP.md` Phase 2 ("local simulator, no blockchain"). Implements the logic specified in `docs/POIG-SPEC.md` and `docs/ECONOMIC-MODEL.md`, and exercises nine attack scenarios from `docs/security/ECONOMIC-ATTACKS.md`.
+The first executable proof-of-concept for AION's PoIG (Proof of Intelligence Gain) reward mechanism, per `docs/ROADMAP.md` Phase 2 ("local simulator, no blockchain"). Implements the logic specified in `docs/POIG-SPEC.md` and `docs/ECONOMIC-MODEL.md`, and exercises ten attack scenarios from `docs/security/ECONOMIC-ATTACKS.md`.
 
 ## What this is
 An in-memory (no network, no chain, no real inference) model of:
@@ -14,6 +14,7 @@ An in-memory (no network, no chain, no real inference) model of:
 - A minimal job market / actor simulation (`poig_sim/market.py`).
 - A Monte Carlo scale sweep (`scale_sweep.py`) measuring how the market simulation actually performs at increasing node counts.
 - L4 dispute-cost-allocation economics (`poig_sim/dispute_economics.py`), modeling challenger bond forfeiture and its split between the disputed worker and protocol treasury, per `docs/protocol/SLASHING-SPEC.md`.
+- A weighted-authorization treasury with a timelock/veto mechanism (`poig_sim/treasury.py`), modeling the multisig + timelock + guardian-veto design described (not yet built) for the Phase 10 contract layer.
 
 ## What this is NOT
 Not a P2P network, not a blockchain, not connected to any real inference runtime, and not modeling multi-agent off-protocol collusion economics (side payments, cartel formation dynamics) — those remain design-time analysis in `docs/security/ECONOMIC-ATTACKS.md`, explicitly not claimed as simulated.
@@ -23,7 +24,7 @@ Not a P2P network, not a blockchain, not connected to any real inference runtime
 ```
 cd simulations/poig_sim
 pip install -e .
-pytest -q                 # 31 tests
+pytest -q                 # 37 tests
 python scale_sweep.py     # Monte Carlo scale sweep, prints measured timing
 ```
 
@@ -38,6 +39,7 @@ python scale_sweep.py     # Monte Carlo scale sweep, prints measured timing
 - `tests/test_stake_concentration.py` — a 2-of-10 headcount-minority validator cluster with concentrated stake (weight 40 vs. the honest majority's 8) dominates a quorum outcome, while the identical headcount split under equal weights does not; a weight sweep confirms the flip point tracks the whales' aggregate weight share crossing 50%, not their headcount — weight, not headcount, is the real security parameter, and this remains a genuinely open design gap (not resolved by quorum weighting alone).
 - `tests/test_wash_trading.py` — two distinct sock-puppet identities (not the same self-dealing gate — a genuinely different attack) cycling capital through many rounds of jobs cannot net-extract more cumulative reward than they commit, even at the attacker's most favorable settings (maxed `DemandFactor`, matured reputation, L4 passing every round): the reward/escrow ratio stays well under 1.0 (asymptotically bounded by `VerificationConfidence`'s L4 ceiling). The reward formula's multiplicative structure, not graph analysis, is what prevents direct profit here — honestly scoped to not claim this also prevents the "fake apparent activity/volume for optics" half of wash trading, which is a separate, still-unmitigated concern.
 - `tests/test_griefing.py` — a challenger who disputes every job from a target worker with no informational edge (pure griefing) loses their entire bond every round regardless of how the forfeited bond is split between the worker and protocol treasury, while a challenger who is genuinely always right (a control case, not griefing) is profitable — confirming the mechanism penalizes frivolous disputing specifically, not disputing in general. Honestly scoped: covers the direct capital cost only, not latency/opportunity-cost griefing damage, and documents that a worker-compensation split of 0 leaves the griefed worker with no direct payout at all.
+- `tests/test_treasury_drain.py` — a weighted-authorization scheme alone has the same majority-collusion limitation already proven for L6 quorum: a minority of compromised signing weight cannot even propose a treasury drain, but a compromised majority can, and without a timelock it executes instantly (documented residual risk, not hidden). A timelock + independent guardian veto is a genuinely different, additional mitigation: it can stop an otherwise-fully-authorized drain if exercised within the window, but a control test confirms the timelock is a real bounded window — an unvetoed drain still executes once it expires, not a silent no-op "protection."
 
 ## Scale sweep results
 
