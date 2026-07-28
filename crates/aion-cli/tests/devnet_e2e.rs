@@ -5,6 +5,7 @@
 //! for real P2P connectivity between separate processes, then tears them
 //! down and confirms they're actually gone.
 
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -117,4 +118,42 @@ fn up_refuses_a_second_run_while_the_first_devnet_is_still_live() {
 
     // Clean up so the temp dir's spawned process doesn't linger past the test.
     run(&["devnet", "down", "--dir", dir_str]);
+}
+
+#[test]
+fn devnet_logs_shows_a_real_running_workers_actual_log_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir_str = dir.path().to_str().unwrap();
+
+    let up_output = run(&["devnet", "up", "--nodes", "1", "--dir", dir_str]);
+    assert!(up_output.status.success());
+
+    // Poll `logs` (non-follow) directly -- it should eventually show the
+    // real "listening on ..." line this worker actually printed, once
+    // it's had time to start and write to its own log file.
+    let saw_listening_line = wait_until(
+        || {
+            let output = run(&["devnet", "logs", "0", "--dir", dir_str]);
+            String::from_utf8_lossy(&output.stdout).contains("node 0: listening on")
+        },
+        Duration::from_secs(10),
+        Duration::from_millis(200),
+    );
+    let final_logs = run(&["devnet", "logs", "0", "--dir", dir_str]);
+    let final_logs_text = String::from_utf8_lossy(&final_logs.stdout).into_owned();
+    assert!(
+        saw_listening_line,
+        "never saw the worker's real listening log line; last logs:\n{final_logs_text}"
+    );
+
+    run(&["devnet", "down", "--dir", dir_str]);
+}
+
+#[test]
+fn devnet_logs_on_an_unknown_node_index_fails_with_a_clear_error() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path()).unwrap();
+    let output = run(&["devnet", "logs", "0", "--dir", dir.path().to_str().unwrap()]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no log file"));
 }

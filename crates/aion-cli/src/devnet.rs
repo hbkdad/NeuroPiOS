@@ -35,6 +35,10 @@ pub enum DevnetError {
         "timed out after {0:?} waiting for node 0's record to appear -- did it fail to start?"
     )]
     BootstrapTimeout(Duration),
+    #[error(
+        "no log file for node {0} in {1:?} -- has `aion devnet up` been run in this directory?"
+    )]
+    NoSuchLog(usize, PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +52,44 @@ pub struct NodeRecord {
 
 fn record_path(dir: &Path, index: usize) -> PathBuf {
     dir.join(format!("node-{index}.info"))
+}
+
+pub fn log_path(dir: &Path, index: usize) -> PathBuf {
+    dir.join(format!("node-{index}.log"))
+}
+
+/// Reads whatever new bytes have been appended to node `index`'s log
+/// since byte offset `from_byte`, returning `(new_content,
+/// current_total_length)`. Calling this repeatedly with the returned
+/// length as the next call's `from_byte` is a real, working `tail -f`:
+/// `aion devnet logs --follow` is just this in a sleep loop. Called with
+/// `from_byte: 0`, it simply returns the log's entire current contents.
+pub fn read_log_from(
+    dir: &Path,
+    index: usize,
+    from_byte: u64,
+) -> Result<(String, u64), DevnetError> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let path = log_path(dir, index);
+    let mut file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(DevnetError::NoSuchLog(index, dir.to_path_buf()))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let total_len = file.metadata()?.len();
+    if from_byte >= total_len {
+        // Nothing new (or the log was truncated/rotated out from under
+        // us) -- report the current length so a caller's next poll
+        // starts from a sane place rather than re-reading forever.
+        return Ok((String::new(), total_len));
+    }
+    file.seek(SeekFrom::Start(from_byte))?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)?;
+    Ok((buf, total_len))
 }
 
 pub fn write_record(
@@ -211,6 +253,54 @@ pub fn down(dir: &Path) -> Result<usize, DevnetError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_log_from_a_missing_log_file_returns_no_such_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_log_from(dir.path(), 0, 0).unwrap_err();
+        assert!(matches!(err, DevnetError::NoSuchLog(0, _)));
+    }
+
+    #[test]
+    fn read_log_from_zero_returns_the_entire_existing_log() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(log_path(dir.path(), 0), "line one\nline two\n").unwrap();
+
+        let (content, total_len) = read_log_from(dir.path(), 0, 0).unwrap();
+        assert_eq!(content, "line one\nline two\n");
+        assert_eq!(total_len, "line one\nline two\n".len() as u64);
+    }
+
+    #[test]
+    fn read_log_from_the_current_length_returns_nothing_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = log_path(dir.path(), 0);
+        fs::write(&path, "already read this").unwrap();
+        let already_read_len = fs::metadata(&path).unwrap().len();
+
+        let (content, total_len) = read_log_from(dir.path(), 0, already_read_len).unwrap();
+        assert_eq!(content, "");
+        assert_eq!(total_len, already_read_len);
+    }
+
+    #[test]
+    fn read_log_from_an_offset_returns_only_the_appended_tail() {
+        // This is the real "tail -f" property the CLI's --follow mode
+        // relies on: calling again with the previous total length as
+        // from_byte returns ONLY what was newly appended, not the whole
+        // file again.
+        let dir = tempfile::tempdir().unwrap();
+        let path = log_path(dir.path(), 0);
+        fs::write(&path, "first chunk\n").unwrap();
+        let (_, offset_after_first) = read_log_from(dir.path(), 0, 0).unwrap();
+
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        std::io::Write::write_all(&mut file, b"second chunk\n").unwrap();
+
+        let (new_content, new_total) = read_log_from(dir.path(), 0, offset_after_first).unwrap();
+        assert_eq!(new_content, "second chunk\n");
+        assert_eq!(new_total, "first chunk\nsecond chunk\n".len() as u64);
+    }
 
     #[test]
     fn write_then_read_record_round_trips() {

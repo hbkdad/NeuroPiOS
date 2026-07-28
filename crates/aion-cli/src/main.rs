@@ -58,6 +58,16 @@ enum DevnetAction {
         #[arg(long, default_value = DEFAULT_DEVNET_DIR)]
         dir: PathBuf,
     },
+    /// Print a devnet node's log file. With --follow, keeps printing new
+    /// output as it's written (like `tail -f`) until interrupted.
+    Logs {
+        /// Which node's log to show (its `--index` in `devnet up`).
+        index: usize,
+        #[arg(long, default_value = DEFAULT_DEVNET_DIR)]
+        dir: PathBuf,
+        #[arg(long, short = 'f')]
+        follow: bool,
+    },
 }
 
 #[tokio::main]
@@ -108,6 +118,36 @@ async fn main() -> ExitCode {
                     ExitCode::FAILURE
                 }
             },
+            DevnetAction::Logs { index, dir, follow } => {
+                let mut offset = match devnet::read_log_from(&dir, index, 0) {
+                    Ok((content, offset)) => {
+                        print!("{content}");
+                        offset
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                if !follow {
+                    return ExitCode::SUCCESS;
+                }
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    match devnet::read_log_from(&dir, index, offset) {
+                        Ok((content, new_offset)) => {
+                            if !content.is_empty() {
+                                print!("{content}");
+                            }
+                            offset = new_offset;
+                        }
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                }
+            }
         },
         Command::Worker { index, dir } => match worker::run(index, dir).await {
             Ok(()) => ExitCode::SUCCESS,

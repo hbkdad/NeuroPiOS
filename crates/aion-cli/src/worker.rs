@@ -71,6 +71,11 @@ pub async fn run(index: usize, dir: PathBuf) -> Result<(), WorkerError> {
     let peer_id = handle.peer_id();
     let pid = std::process::id();
     let mut connected: Vec<String> = Vec::new();
+    // These println!s are this worker's real log output -- `devnet up`
+    // redirects each worker's stdout to its own node-<index>.log file
+    // (see devnet.rs's module doc), and `aion devnet logs <index>`
+    // reads exactly this.
+    println!("node {index}: listening on {listen_addr}, peer_id={peer_id}");
     devnet::write_record(
         &dir,
         index,
@@ -86,6 +91,7 @@ pub async fn run(index: usize, dir: PathBuf) -> Result<(), WorkerError> {
             .listen_addr
             .parse()
             .map_err(|e| WorkerError::BadBootstrapAddr(bootstrap.listen_addr.clone(), e))?;
+        println!("node {index}: dialing bootstrap node 0 at {addr}");
         handle.dial(addr);
     }
 
@@ -93,6 +99,7 @@ pub async fn run(index: usize, dir: PathBuf) -> Result<(), WorkerError> {
         if let Some(NodeEvent::ConnectionEstablished(peer)) = handle.next_event().await {
             let peer_str = peer.to_string();
             if !connected.contains(&peer_str) {
+                println!("node {index}: connected to peer {peer_str}");
                 connected.push(peer_str);
                 devnet::write_record(
                     &dir,
