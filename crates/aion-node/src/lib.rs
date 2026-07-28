@@ -2,10 +2,12 @@
 //! mandatory resource-safety caps. See docs/ARCHITECTURE.md's Node
 //! Architecture and Node Safety sections.
 
+pub mod handle;
 pub mod hardware;
 pub mod resource_caps;
 pub mod roles;
 
+pub use handle::{NodeEvent, NodeHandle};
 pub use hardware::HardwareProfile;
 pub use resource_caps::ResourceCaps;
 pub use roles::{NodeRoleKind, NodeRoles};
@@ -66,6 +68,17 @@ impl Node {
             keypair,
             self.caps.to_connection_limits(),
         )?)
+    }
+
+    /// Builds this node's swarm (per `build_swarm`) and hands it off to a
+    /// background `tokio` task that owns and drives it, returning a
+    /// `NodeHandle` -- a channel-based command/event API -- instead of a
+    /// raw `Swarm` the caller has to poll manually. Requires an active
+    /// `tokio` runtime (uses `tokio::spawn`), matching this crate's
+    /// existing async/tokio-based design throughout.
+    pub fn spawn(&self) -> Result<NodeHandle, NodeError> {
+        let swarm = self.build_swarm()?;
+        Ok(handle::spawn(swarm))
     }
 }
 
