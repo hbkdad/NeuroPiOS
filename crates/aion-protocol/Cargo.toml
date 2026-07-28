@@ -1,0 +1,11 @@
+[package]
+name = "aion-protocol"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "AION canonical job/model-manifest protocol types and job-lifecycle state machine (docs/PROTOCOL.md)"
+
+[dependencies]
+thiserror = "1"
+
+[dev-dependencies]

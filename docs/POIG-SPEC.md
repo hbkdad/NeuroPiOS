@@ -71,6 +71,10 @@ Per completed job, the fee is split among compute provider, model creator(s) (wa
 
 Autonomous agents requesting paid work (per the brief's Agent Economy section) operate under an owner-defined `spendingAuthorization`: per-job limit, daily limit, an explicit allow-list of service types, and owner-revocable at any time. An agent is never issued an unlimited-spend wallet — this is enforced at the job-signing layer (a job signed on an agent's behalf must reference a currently-valid, unexpired `spendingAuthorization` that covers it, or the job is invalid before it ever reaches a worker).
 
+## How a computed reward actually gets paid (settlement trust model)
+
+This spec deliberately says nothing above about how a `Reward` value, once computed, is trusted by the on-chain settlement layer — that question is answered separately in `docs/adr/0007-reward-settlement-trust-model.md` (optimistic Merkle-batch commitments with permissionless fraud proofs, since the PoIG arithmetic itself is cheap to re-verify on-chain; the hard part is making every *input* to the formula independently checkable, which is now a requirement on `docs/VERIFICATION.md` and the reputation store, not on this formula).
+
 ## What Phase 2 actually validates (and what it doesn't yet)
 
 `simulations/poig_sim` implements `UsefulWorkScore`'s escrow/signature gate, a simplified `VerificationConfidence` (from a configurable per-tier confidence table), `ReputationFactor` with decay, and runs attack scenarios (Sybil job self-dealing, fake-benchmark reward farming) to confirm the gate actually blocks the naive versions of those attacks. It does **not** yet validate `QualityFactor`/`ImprovementFactor` against a real hidden benchmark suite (no real models are executed in this container — see `docs/research/CAPABILITY-MATRIX.md`), and does not yet run at the 100/1,000/10,000/100,000-node scale the brief specifies for full economic simulation — that is explicitly future work, not claimed as done here.

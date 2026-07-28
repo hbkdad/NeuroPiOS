@@ -18,7 +18,7 @@ See `docs/ARCHITECTURE.md` for the full picture. Short version: decentralized AI
 ## Where things live
 
 - `docs/` — specs, ADRs, research, security docs. Read before you write code.
-- `crates/` — Rust: node, P2P, protocol, crypto, runtime, verifier, storage, reputation, CLI. Not yet implemented beyond stubs.
+- `crates/` — Rust workspace (root `Cargo.toml`): node, P2P, protocol, crypto, runtime, verifier, storage, reputation, CLI. `aion-protocol` and `aion-crypto` are real, tested implementations (`cargo test --workspace`); the rest remain README stubs until their phase begins — a crate only joins the workspace `members` list once it has real code, per `docs/adr/0005-monorepo-structure.md`.
 - `services/` — off-chain coordination services (Rust/Axum target). Not yet implemented beyond stubs.
 - `contracts/` — Solidity (Foundry target, not yet installed in this environment). Not yet implemented.
 - `apps/` — web/desktop/explorer/docs-site. Not yet implemented beyond stubs.

@@ -26,6 +26,10 @@ Verification failure is not automatically treated as fraud. See `docs/protocol/S
 
 Used wherever a party's answer could otherwise be copied from another party's already-visible answer: benchmark answers, validator decisions, worker bids, and challenge responses all follow a commit-then-reveal pattern (commit = hash of answer + salt, reveal = answer + salt, checked against the earlier commit) so that, e.g., a validator cannot simply copy another validator's on-chain-visible score before submitting their own.
 
+## Outcome publication requirement (added by ADR-0007)
+
+Every verification tier's outcome (pass/fail, and the confidence/quorum detail behind it) must be published somewhere hash-referenceable — a commitment, a dispute-window result, an aggregated quorum signature set, or a ZK proof — never held only in private coordinator memory. This is what makes the reward-settlement fraud-proof mechanism in `docs/adr/0007-reward-settlement-trust-model.md` possible: a challenger recomputing a disputed reward must be able to independently confirm which verification outcome actually backed it, without trusting the coordinator's say-so. `crates/aion-verifier` must satisfy this from its first implementation (Phase 5), not retrofit it later.
+
 ## Adaptive quorum sizing
 
 Quorum/verification-rate scales with both job value and worker track record:

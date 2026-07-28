@@ -30,6 +30,17 @@ Legend: **Available** = usable now without setup. **Requires auth** = present bu
 | Hugging Face MCP (`mcp__Hugging_Face__*`) | model/dataset hub | Search/inspect models, datasets, spaces | Available | Authenticated as `HBKcustoms` | Phase 4 (AI execution), model registry | Low (read-heavy) | Candidate for model manifest metadata lookups later; not used this milestone |
 | Local Ollama/vLLM/llama.cpp | inference runtime | Actually run models | **Not installed** in this container | N/A | Phase 4 | N/A | Simulator (Phase 2) stubs execution instead of running real weights — no GPU in this container |
 
+## Systems/build tooling (checked 2026-07-28, milestone 2)
+
+| Name | Type | Purpose | Available? | Auth required? | AION phase | Risk | Planned usage |
+|---|---|---|---|---|---|---|---|
+| Rust / Cargo (`cargo 1.94.1`) | language toolchain | Build `crates/*` | **Available** | No | Phase 3+ | Low | Now used for real — `crates/aion-protocol` implemented and tested this milestone (see RESEARCH-LOG) |
+| Node.js / npm (`node v22.22.2`) | language toolchain | Build `apps/*`, `packages/*` | **Available** | No | Phase 7-9 | Low | Not yet used; available when TS work starts |
+| Docker | containerization | `aion devnet`, CI, reproducible builds | **Available** | No | Phase 3+ / DevOps | Medium (irreversible if misused, e.g. volume deletion) | Not yet used; candidate for future devnet tooling |
+| Foundry (forge/anvil) | Solidity toolchain | Compile/test/deploy contracts | **Still not installed** | N/A | Phase 10 | N/A | Install via `foundryup` only when Phase 10 begins, not before |
+
+This corrects the milestone-1 assumption that only Python was usable — Rust and Node are both real in this container and are now used for real implementation work, not just README stubs.
+
 ## Irrelevant-to-AION connectors present in this session
 
 Amplitude, Apollo.io, Asana, Figma, Gamma, Gmail, Google Calendar/Drive, HubSpot, Slack, Spotify, Supabase, Vercel, Zapier, Composio are all present as MCP servers in this account but have **no relevant AION phase**. Per the "do not invoke irrelevant tools merely to claim they were used" rule, none of these are used in this project.
