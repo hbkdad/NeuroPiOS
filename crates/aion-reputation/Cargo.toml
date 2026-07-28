@@ -1,0 +1,10 @@
+[package]
+name = "aion-reputation"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "AION multi-dimensional decaying reputation store and PoIG reward computation (docs/POIG-SPEC.md, docs/ARCHITECTURE.md), ported from and pinned against simulations/poig_sim/poig_sim/reputation.py and poig.py"
+
+[dependencies]
+
+[dev-dependencies]
