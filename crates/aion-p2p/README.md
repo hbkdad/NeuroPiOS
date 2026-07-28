@@ -19,7 +19,6 @@ rust-libp2p wrapper per `docs/adr/0002-p2p-stack.md`.
 **Not yet done (explicitly deferred, not hidden):**
 - **DCUtR** (Direct Connection Upgrade through Relay — hole-punching to upgrade a relayed connection to a direct one) is not implemented; relayed connections stay relayed for their whole lifetime, which works but doesn't get the bandwidth/latency benefit of a direct path once one becomes viable.
 - **`app_specific_weight`** in peer scoring is unused — reserved for `crates/aion-reputation`'s multi-dimensional reputation score to plug in once that crate exists as real Rust (currently only the Phase 2 Python simulator).
-- Connection limits are not yet wired to `aion-node`'s `ResourceCaps` (Node Safety) — a node's configured bandwidth/resource caps and its P2P connection limits are still two independent, unconnected knobs.
 - Relay rate limits (`relay::Config::default()`'s per-peer/per-IP reservation and circuit caps) are library defaults, not yet tuned against real network load — same caveat as every other default in this crate.
 
 ## Resolved issue: 3-node relayed Kademlia discovery (milestone 4 → milestone 11)

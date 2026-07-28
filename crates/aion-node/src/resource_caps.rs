@@ -4,6 +4,8 @@
 //! job-acceptance decision in a future `aion-node` scheduler must consult
 //! `ResourceCaps::allows_new_work`, not just hardware capacity.
 
+use libp2p::connection_limits::ConnectionLimits;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceCaps {
     pub max_cpu_percent: f32,
@@ -30,6 +32,55 @@ impl ResourceCaps {
             idle_only: true,
             working_hours: None,
         }
+    }
+
+    /// Derives P2P connection limits from these resource caps, per
+    /// docs/ARCHITECTURE.md's Node Safety principle extended to network
+    /// resources (not just CPU/memory/storage) -- closing the gap flagged
+    /// in `crates/aion-p2p/README.md`'s "Not yet done" list, where a
+    /// node's bandwidth cap and its P2P connection limits used to be two
+    /// independent, unconnected knobs. Never LOOSER than
+    /// `aion_p2p::default_connection_limits()` -- this only ever tightens
+    /// that ceiling, matching `allows_new_work`'s own "only ever says no
+    /// more strictly than the raw caps" invariant. Never goes all the way
+    /// to zero connections either, even at `max_bandwidth_mbps == Some(0)`
+    /// (the `locked_down()` default): "no job-payload bandwidth budgeted
+    /// yet" is not the same claim as "this node should be unreachable on
+    /// the network" -- baseline protocol traffic (gossip mesh membership,
+    /// Kademlia routing, Identify) is not job execution, and a
+    /// resource-locked node still needs to be a real, discoverable member
+    /// of the network, not silently cut off from it.
+    ///
+    /// - `max_bandwidth_mbps == Some(mbps)`: established connection caps
+    ///   scale with `mbps`, under a documented, deliberately conservative
+    ///   assumption of `ASSUMED_MBPS_PER_CONNECTION` Mbps of overhead per
+    ///   established connection, floored at 1 connection minimum. This is
+    ///   a starting heuristic, not measured against real traffic -- the
+    ///   same tunable-not-final caveat that applies to every other
+    ///   approximate weight in this codebase (see `docs/POIG-SPEC.md`'s
+    ///   equivalent note) -- clamped so it can never exceed `aion_p2p`'s
+    ///   own default ceilings.
+    /// - `max_bandwidth_mbps == None` ("no explicit bandwidth limit
+    ///   configured"): falls back to `aion_p2p::default_connection_limits()`
+    ///   unchanged.
+    pub fn to_connection_limits(&self) -> ConnectionLimits {
+        let default = aion_p2p::default_connection_limits();
+
+        let Some(mbps) = self.max_bandwidth_mbps else {
+            return default;
+        };
+
+        const ASSUMED_MBPS_PER_CONNECTION: u32 = 1;
+        let scaled = mbps.saturating_div(ASSUMED_MBPS_PER_CONNECTION).max(1);
+        let clamp = |ceiling: u32| scaled.min(ceiling);
+
+        ConnectionLimits::default()
+            .with_max_pending_incoming(Some(clamp(aion_p2p::DEFAULT_MAX_PENDING_INCOMING)))
+            .with_max_pending_outgoing(Some(clamp(aion_p2p::DEFAULT_MAX_PENDING_OUTGOING)))
+            .with_max_established_incoming(Some(clamp(aion_p2p::DEFAULT_MAX_ESTABLISHED_INCOMING)))
+            .with_max_established_outgoing(Some(clamp(aion_p2p::DEFAULT_MAX_ESTABLISHED_OUTGOING)))
+            .with_max_established_per_peer(Some(clamp(aion_p2p::DEFAULT_MAX_ESTABLISHED_PER_PEER)))
+            .with_max_established(Some(clamp(aion_p2p::DEFAULT_MAX_ESTABLISHED)))
     }
 
     /// Whether new work may be accepted right now, given current observed
@@ -144,5 +195,88 @@ mod tests {
         assert!(caps.allows_new_work(0.0, 0, 23));
         assert!(caps.allows_new_work(0.0, 0, 2));
         assert!(!caps.allows_new_work(0.0, 0, 12));
+    }
+
+    // `ConnectionLimits` has no getters (builder-only setters, see its own
+    // doc), so these tests inspect its `Debug` output -- a legitimate way
+    // to verify internal state when a type deliberately doesn't expose one,
+    // and more honest than skipping verification of the actual values.
+    fn debug_string(caps: &ResourceCaps) -> String {
+        format!("{:?}", caps.to_connection_limits())
+    }
+
+    #[test]
+    fn locked_down_caps_still_allow_at_least_minimal_p2p_connectivity() {
+        // ResourceCaps::locked_down() means "no job-payload bandwidth
+        // budgeted yet," not "this node should be unreachable" -- gossip
+        // mesh membership, Kademlia routing, and Identify are baseline
+        // protocol traffic, not job execution, so a freshly-bootstrapped
+        // node must still be able to make and accept at least one
+        // connection (this is also what keeps tests/node_gossip.rs's
+        // two-freshly-bootstrapped-nodes scenario working).
+        let caps = ResourceCaps::locked_down();
+        let debug = debug_string(&caps);
+        assert!(debug.contains("max_established_incoming: Some(1)"));
+        assert!(debug.contains("max_established_outgoing: Some(1)"));
+    }
+
+    #[test]
+    fn no_bandwidth_cap_configured_falls_back_to_aion_p2p_defaults_unchanged() {
+        let caps = ResourceCaps {
+            max_bandwidth_mbps: None,
+            ..ResourceCaps::locked_down()
+        };
+        let debug = debug_string(&caps);
+        assert!(debug.contains(&format!(
+            "max_established_incoming: Some({})",
+            aion_p2p::DEFAULT_MAX_ESTABLISHED_INCOMING
+        )));
+    }
+
+    #[test]
+    fn a_small_positive_bandwidth_cap_scales_down_connection_limits() {
+        let caps = ResourceCaps {
+            max_bandwidth_mbps: Some(5),
+            ..ResourceCaps::locked_down()
+        };
+        let debug = debug_string(&caps);
+        // 5 Mbps at the documented 1-Mbps-per-connection assumption -> 5,
+        // well under aion_p2p's default ceiling of 100.
+        assert!(debug.contains("max_established_incoming: Some(5)"));
+        assert!(debug.contains("max_established_outgoing: Some(5)"));
+    }
+
+    #[test]
+    fn a_large_bandwidth_cap_is_clamped_to_aion_p2p_defaults_not_looser() {
+        let caps = ResourceCaps {
+            max_bandwidth_mbps: Some(1_000_000), // absurdly generous
+            ..ResourceCaps::locked_down()
+        };
+        let debug = debug_string(&caps);
+        // Never looser than aion_p2p's own ceiling, no matter how generous
+        // the configured bandwidth cap is.
+        assert!(debug.contains(&format!(
+            "max_established_incoming: Some({})",
+            aion_p2p::DEFAULT_MAX_ESTABLISHED_INCOMING
+        )));
+        assert!(debug.contains(&format!(
+            "max_established_total: Some({})",
+            aion_p2p::DEFAULT_MAX_ESTABLISHED
+        )));
+    }
+
+    #[test]
+    fn a_sub_one_mbps_cap_still_allows_at_least_one_connection_not_zero() {
+        // Rounding a tiny positive bandwidth cap down to zero connections
+        // would be indistinguishable from the locked-down case, which is
+        // wrong -- the operator explicitly configured SOME positive
+        // bandwidth, so the node should be able to make at least one
+        // connection, not be silently treated as fully locked down.
+        let caps = ResourceCaps {
+            max_bandwidth_mbps: Some(1),
+            ..ResourceCaps::locked_down()
+        };
+        let debug = debug_string(&caps);
+        assert!(!debug.contains("max_established_incoming: Some(0)"));
     }
 }

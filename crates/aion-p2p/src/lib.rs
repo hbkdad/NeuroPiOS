@@ -237,6 +237,19 @@ pub fn build_relay_server(local_peer_id: PeerId) -> relay::Behaviour {
     relay::Behaviour::new(local_peer_id, relay::Config::default())
 }
 
+/// Named ceiling values behind `default_connection_limits`, exposed so
+/// other crates (e.g. `crates/aion-node`, deriving connection limits from
+/// operator-configured `ResourceCaps`) can scale or clamp against the same
+/// numbers instead of hardcoding a second, potentially-drifting copy.
+/// `ConnectionLimits` itself has no getters (builder-only setters), so
+/// this is the only source of truth for what the defaults actually are.
+pub const DEFAULT_MAX_PENDING_INCOMING: u32 = 30;
+pub const DEFAULT_MAX_PENDING_OUTGOING: u32 = 30;
+pub const DEFAULT_MAX_ESTABLISHED_INCOMING: u32 = 100;
+pub const DEFAULT_MAX_ESTABLISHED_OUTGOING: u32 = 100;
+pub const DEFAULT_MAX_ESTABLISHED_PER_PEER: u32 = 4;
+pub const DEFAULT_MAX_ESTABLISHED: u32 = 200;
+
 /// Conservative default connection limits, per docs/adr/0002-p2p-stack.md's
 /// anti-spam requirement and docs/ARCHITECTURE.md's Node Safety principle
 /// extended to network resources, not just CPU/memory/storage: a node
@@ -250,12 +263,12 @@ pub fn build_relay_server(local_peer_id: PeerId) -> relay::Behaviour {
 /// every other weight/threshold in this codebase.
 pub fn default_connection_limits() -> connection_limits::ConnectionLimits {
     connection_limits::ConnectionLimits::default()
-        .with_max_pending_incoming(Some(30))
-        .with_max_pending_outgoing(Some(30))
-        .with_max_established_incoming(Some(100))
-        .with_max_established_outgoing(Some(100))
-        .with_max_established_per_peer(Some(4))
-        .with_max_established(Some(200))
+        .with_max_pending_incoming(Some(DEFAULT_MAX_PENDING_INCOMING))
+        .with_max_pending_outgoing(Some(DEFAULT_MAX_PENDING_OUTGOING))
+        .with_max_established_incoming(Some(DEFAULT_MAX_ESTABLISHED_INCOMING))
+        .with_max_established_outgoing(Some(DEFAULT_MAX_ESTABLISHED_OUTGOING))
+        .with_max_established_per_peer(Some(DEFAULT_MAX_ESTABLISHED_PER_PEER))
+        .with_max_established(Some(DEFAULT_MAX_ESTABLISHED))
 }
 
 /// Builds a fully wired TCP+Noise+Yamux swarm with the AION behaviour set

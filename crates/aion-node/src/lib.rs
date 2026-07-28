@@ -52,12 +52,20 @@ impl Node {
     /// `aion_p2p::keypair_from_identity`, per docs/ARCHITECTURE.md's
     /// Identity Separation section) -- the node's PeerID is genuinely
     /// derived from its `p2p_identity`, not a separately-generated key.
+    /// Connection limits are derived from THIS node's own `caps` (see
+    /// `ResourceCaps::to_connection_limits`), so a node's P2P network
+    /// load is actually bounded by its configured resource budget, not an
+    /// unrelated fixed default -- a freshly-bootstrapped, still-locked-down
+    /// node genuinely refuses inbound connections, not just new work.
     /// This does not start listening or dialing anything; the caller
     /// drives the returned swarm (see crates/aion-p2p's tests for the
     /// event-loop pattern this is meant to be driven with).
     pub fn build_swarm(&self) -> Result<libp2p::swarm::Swarm<aion_p2p::AionBehaviour>, NodeError> {
         let keypair = aion_p2p::keypair_from_identity(&self.p2p_identity)?;
-        Ok(aion_p2p::build_swarm(keypair)?)
+        Ok(aion_p2p::build_swarm_with_limits(
+            keypair,
+            self.caps.to_connection_limits(),
+        )?)
     }
 }
 
