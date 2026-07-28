@@ -7,17 +7,23 @@
 //! command/event API -- so a caller never touches `Swarm` directly.
 //!
 //! Honest scope note: this is a real, working event loop (dial, listen,
-//! gossip subscribe/publish, and the events that matter for those), not a
-//! full command surface over every behaviour this crate wires in
-//! (Kademlia queries, AutoNAT status, relay reservations aren't exposed
-//! through `NodeHandle` yet) -- it covers what `tests/node_gossip.rs`
-//! already proved works manually, now reachable without hand-rolling the
+//! gossip subscribe/publish, Kademlia bootstrap-seeding/queries, and the
+//! events that matter for those), not a full command surface over every
+//! behaviour this crate wires in (AutoNAT status and relay reservations
+//! aren't exposed through `NodeHandle` yet) -- it covers what
+//! `tests/node_gossip.rs` and `crates/aion-p2p/tests/kademlia_discovery.rs`
+//! already proved work manually, now reachable without hand-rolling the
 //! event loop, and is meant to grow incrementally as real callers need
 //! more of the surface.
 
 use aion_p2p::{AionBehaviour, AionBehaviourEvent, Topic};
 use futures::StreamExt;
-use libp2p::{gossipsub, swarm::SwarmEvent, Multiaddr, PeerId, Swarm};
+use libp2p::{
+    gossipsub,
+    kad::{self, QueryResult},
+    swarm::SwarmEvent,
+    Multiaddr, PeerId, Swarm,
+};
 use tokio::sync::mpsc;
 
 enum Command {
@@ -25,12 +31,14 @@ enum Command {
     Dial(Multiaddr),
     Subscribe(gossipsub::IdentTopic),
     Publish(gossipsub::IdentTopic, Vec<u8>),
+    AddKademliaBootstrapPeer(PeerId, Multiaddr),
+    FindClosestPeers(PeerId),
 }
 
 /// Events surfaced to a `NodeHandle` from its background swarm. Not
 /// exhaustive over every possible `SwarmEvent` -- only what this crate's
-/// current real use cases (gossip, basic connectivity) need; see the
-/// module doc's scope note.
+/// current real use cases (gossip, basic connectivity, peer discovery)
+/// need; see the module doc's scope note.
 #[derive(Debug, Clone)]
 pub enum NodeEvent {
     NewListenAddr(Multiaddr),
@@ -39,6 +47,16 @@ pub enum NodeEvent {
         topic: String,
         source: Option<PeerId>,
         data: Vec<u8>,
+    },
+    /// The result of a `find_closest_peers` query -- `peers` may
+    /// legitimately be empty (see
+    /// `crates/aion-p2p/tests/kademlia_discovery.rs`'s scope note: a
+    /// responder only returns peers from its OWN routing table closer to
+    /// the target than itself, so a small/fresh network can genuinely
+    /// have nothing to return).
+    ClosestPeersFound {
+        target: PeerId,
+        peers: Vec<PeerId>,
     },
 }
 
@@ -76,6 +94,22 @@ impl NodeHandle {
         let _ = self.commands.send(Command::Publish(topic.0.clone(), data));
     }
 
+    /// Manually seeds a peer into this node's Kademlia routing table --
+    /// every DHT needs at least one already-known peer to bootstrap from
+    /// (see `aion_p2p::add_kademlia_bootstrap_peer`'s own doc).
+    pub fn add_kademlia_bootstrap_peer(&self, peer_id: PeerId, addr: Multiaddr) {
+        let _ = self
+            .commands
+            .send(Command::AddKademliaBootstrapPeer(peer_id, addr));
+    }
+
+    /// Issues a real Kademlia `get_closest_peers` query for `target`; the
+    /// result arrives asynchronously as `NodeEvent::ClosestPeersFound` via
+    /// `next_event`.
+    pub fn find_closest_peers(&self, target: PeerId) {
+        let _ = self.commands.send(Command::FindClosestPeers(target));
+    }
+
     /// Awaits the next event from this node's background swarm. Returns
     /// `None` once the background task has stopped (e.g. this handle and
     /// all its clones were dropped, closing the command channel).
@@ -106,6 +140,16 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                         Some(Command::Publish(topic, data)) => {
                             let _ = swarm.behaviour_mut().gossipsub.publish(topic, data);
                         }
+                        Some(Command::AddKademliaBootstrapPeer(peer_id, addr)) => {
+                            aion_p2p::add_kademlia_bootstrap_peer(
+                                &mut swarm.behaviour_mut().kademlia,
+                                peer_id,
+                                addr,
+                            );
+                        }
+                        Some(Command::FindClosestPeers(target)) => {
+                            swarm.behaviour_mut().kademlia.get_closest_peers(target);
+                        }
                         // All NodeHandle clones dropped -- nothing left to
                         // drive this swarm on behalf of, so stop the task
                         // rather than looping forever ownerless.
@@ -134,6 +178,20 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                                 source: Some(propagation_source),
                                 data: message.data,
                             });
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::Kademlia(
+                            kad::Event::OutboundQueryProgressed {
+                                result: QueryResult::GetClosestPeers(Ok(ok)),
+                                ..
+                            },
+                        )) => {
+                            let target = PeerId::from_bytes(&ok.key).ok();
+                            if let Some(target) = target {
+                                let _ = event_tx.send(NodeEvent::ClosestPeersFound {
+                                    target,
+                                    peers: ok.peers,
+                                });
+                            }
                         }
                         _ => {}
                     }
