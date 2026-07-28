@@ -1,7 +1,7 @@
 # ADR 0002: P2P Stack — rust-libp2p (Tokio)
 
 ## Status
-Accepted
+Accepted, and first-pass implemented (milestone 3): `crates/aion-p2p` has a working GossipSub+Identify swarm over TCP+Noise+Yamux with a real two-peer publish/receive integration test. Kademlia, AutoNAT, and circuit relay remain unimplemented — see `crates/aion-p2p/README.md` for exactly what's done vs. deferred.
 
 ## Context
 AION's node network needs peer discovery, NAT traversal, gossip-based job/announcement propagation, and a DHT for content/model lookup. The orchestration brief's default hypothesis is Rust + Tokio + rust-libp2p unless research shows a stronger alternative.

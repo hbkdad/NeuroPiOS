@@ -7,6 +7,8 @@ resolver = "2"
 members = [
     "crates/aion-protocol",
     "crates/aion-crypto",
+    "crates/aion-node",
+    "crates/aion-p2p",
 ]
 
 [workspace.package]
