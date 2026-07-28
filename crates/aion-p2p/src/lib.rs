@@ -1,15 +1,20 @@
 //! AION P2P networking, per docs/adr/0002-p2p-stack.md: rust-libp2p on
 //! Tokio. GossipSub (job/announcement propagation), Identify, Kademlia
-//! (peer discovery), AutoNAT (reachability detection), and circuit relay
-//! (the actual NAT-traversal transport AutoNAT alone can only detect the
-//! need for) over TCP+Noise+Yamux.
+//! (peer discovery), AutoNAT (reachability detection), circuit relay (the
+//! actual NAT-traversal transport AutoNAT alone can only detect the need
+//! for), and DCUtR (upgrading a relayed connection to a direct one once
+//! hole-punching succeeds, so a relay only pays ongoing bandwidth for
+//! connections that genuinely can't go direct) over TCP+Noise+Yamux.
 //!
 //! Every node built by this crate gets BOTH relay roles -- relay-client
 //! (so it can dial an otherwise-unreachable peer through a relay) and
 //! relay-server (so it can help relay for others) -- rather than treating
 //! relaying as opt-in. This matches the same "no free-riders" choice
 //! already made for Kademlia (every node is forced into server mode, per
-//! `build_kademlia`'s doc), not a new policy invented for relay.
+//! `build_kademlia`'s doc), not a new policy invented for relay. DCUtR is
+//! passive/automatic once wired in (it reacts to relayed connections
+//! being established, it isn't something a caller drives directly), so
+//! every node gets it too.
 //!
 //! The P2P identity keypair can be either a fresh libp2p-generated Ed25519
 //! key (`identity::Keypair::generate_ed25519()`) or bridged from an
@@ -20,7 +25,7 @@
 //! that happen to both be called "identity".
 
 use libp2p::{
-    autonat, connection_limits, gossipsub, identify, identity, kad, noise, relay,
+    autonat, connection_limits, dcutr, gossipsub, identify, identity, kad, noise, relay,
     swarm::{NetworkBehaviour, Swarm},
     tcp, yamux, Multiaddr, PeerId,
 };
@@ -49,6 +54,10 @@ pub struct AionBehaviour {
     /// Relay-client role: this node can dial other peers THROUGH a relay
     /// (a `/p2p-circuit` address) when a direct connection isn't possible.
     pub relay_client: relay::client::Behaviour,
+    /// Automatically attempts to upgrade an established relayed connection
+    /// to a direct one via hole-punching -- purely reactive, not driven by
+    /// explicit commands.
+    pub dcutr: dcutr::Behaviour,
 }
 
 pub const IDENTIFY_PROTOCOL_VERSION: &str = "/aion/identify/0.1.0";
@@ -320,6 +329,7 @@ pub fn build_swarm_with_limits_and_autonat_config(
             let connection_limits = connection_limits::Behaviour::new(limits);
             let autonat = build_autonat(local_peer_id, autonat_config);
             let relay = build_relay_server(local_peer_id);
+            let dcutr = dcutr::Behaviour::new(local_peer_id);
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(AionBehaviour {
                 gossipsub,
                 identify,
@@ -328,6 +338,7 @@ pub fn build_swarm_with_limits_and_autonat_config(
                 autonat,
                 relay,
                 relay_client,
+                dcutr,
             })
         })
         .map_err(|e| P2pError::SwarmBuild(e.to_string()))?

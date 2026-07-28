@@ -8,18 +8,18 @@
 //!
 //! Honest scope note: this is a real, working event loop (dial, listen,
 //! gossip subscribe/publish, Kademlia bootstrap-seeding/queries, AutoNAT
-//! status, and relay-server activity, and the events that matter for
-//! those), not a full command surface over every behaviour this crate
-//! wires in -- relay-CLIENT reservation confirmation isn't surfaced as
-//! its own event yet (though `listen_on`/`dial` already work transparently
-//! with `/p2p-circuit` addresses via the generic commands, and a
-//! successful reservation still fires the ordinary `NewListenAddr` event;
-//! see `crates/aion-p2p/tests/circuit_relay.rs`). It covers what
-//! `tests/node_gossip.rs`, `crates/aion-p2p/tests/kademlia_discovery.rs`,
-//! `crates/aion-p2p/tests/autonat_reachability.rs`, and
-//! `crates/aion-p2p/tests/circuit_relay.rs` already proved work manually,
-//! now reachable without hand-rolling the event loop, and is meant to
-//! grow incrementally as real callers need more of the surface.
+//! status, relay-server activity, and DCUtR hole-punch outcomes, and the
+//! events that matter for those), not a full command surface over every
+//! behaviour this crate wires in -- relay-CLIENT reservation confirmation
+//! isn't surfaced as its own event yet (though `listen_on`/`dial` already
+//! work transparently with `/p2p-circuit` addresses via the generic
+//! commands, and a successful reservation still fires the ordinary
+//! `NewListenAddr` event; see `crates/aion-p2p/tests/circuit_relay.rs`).
+//! It covers what `tests/node_gossip.rs` and `aion-p2p`'s own
+//! `kademlia_discovery.rs`/`autonat_reachability.rs`/`circuit_relay.rs`/
+//! `dcutr_hole_punch.rs` already proved work manually, now reachable
+//! without hand-rolling the event loop, and is meant to grow
+//! incrementally as real callers need more of the surface.
 
 use aion_p2p::{AionBehaviour, AionBehaviourEvent, Topic};
 use futures::StreamExt;
@@ -89,6 +89,16 @@ pub enum NodeEvent {
     RelayCircuitAccepted {
         src_peer_id: PeerId,
         dst_peer_id: PeerId,
+    },
+    /// DCUtR attempted to upgrade a relayed connection to `remote_peer_id`
+    /// to a direct one via hole-punching. `error` is `None` on success.
+    /// Purely reactive -- there is no command to trigger this, DCUtR acts
+    /// on its own once a relayed connection exists. See
+    /// `crates/aion-p2p/tests/dcutr_hole_punch.rs` for the real protocol
+    /// exchange this reports on.
+    DirectConnectionUpgrade {
+        remote_peer_id: PeerId,
+        error: Option<String>,
     },
 }
 
@@ -259,6 +269,12 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                             let _ = event_tx.send(NodeEvent::RelayCircuitAccepted {
                                 src_peer_id,
                                 dst_peer_id,
+                            });
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::Dcutr(event)) => {
+                            let _ = event_tx.send(NodeEvent::DirectConnectionUpgrade {
+                                remote_peer_id: event.remote_peer_id,
+                                error: event.result.err().map(|e| e.to_string()),
                             });
                         }
                         _ => {}
