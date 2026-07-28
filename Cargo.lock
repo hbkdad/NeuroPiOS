@@ -96,6 +96,9 @@ dependencies = [
 name = "aion-protocol"
 version = "0.1.0"
 dependencies = [
+ "aion-storage",
+ "cid",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

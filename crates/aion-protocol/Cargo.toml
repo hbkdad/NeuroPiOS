@@ -6,6 +6,9 @@ license.workspace = true
 description = "AION canonical job/model-manifest protocol types and job-lifecycle state machine (docs/PROTOCOL.md)"
 
 [dependencies]
+aion-storage = { path = "../aion-storage" }
 thiserror = "1"
 
 [dev-dependencies]
+cid = { version = "0.11", default-features = false, features = ["std"] }
+tempfile = "3"
