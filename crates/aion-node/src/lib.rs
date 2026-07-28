@@ -58,15 +58,31 @@ impl Node {
     /// `ResourceCaps::to_connection_limits`), so a node's P2P network
     /// load is actually bounded by its configured resource budget, not an
     /// unrelated fixed default -- a freshly-bootstrapped, still-locked-down
-    /// node genuinely refuses inbound connections, not just new work.
-    /// This does not start listening or dialing anything; the caller
-    /// drives the returned swarm (see crates/aion-p2p's tests for the
-    /// event-loop pattern this is meant to be driven with).
+    /// node genuinely refuses inbound connections, not just new work. Uses
+    /// `aion_p2p`'s production-default AutoNAT config
+    /// (`only_global_ips: true`); see `build_swarm_with_autonat_config` to
+    /// override that. This does not start listening or dialing anything;
+    /// the caller drives the returned swarm (see crates/aion-p2p's tests
+    /// for the event-loop pattern this is meant to be driven with).
     pub fn build_swarm(&self) -> Result<libp2p::swarm::Swarm<aion_p2p::AionBehaviour>, NodeError> {
+        self.build_swarm_with_autonat_config(aion_p2p::default_autonat_config())
+    }
+
+    /// Same as `build_swarm`, but with a caller-supplied AutoNAT config --
+    /// exists specifically so loopback-only integration tests can set
+    /// `only_global_ips: false` (mirroring
+    /// `aion_p2p::build_swarm_with_limits_and_autonat_config`'s own reason
+    /// for existing) without weakening the production default every other
+    /// caller gets.
+    pub fn build_swarm_with_autonat_config(
+        &self,
+        autonat_config: libp2p::autonat::Config,
+    ) -> Result<libp2p::swarm::Swarm<aion_p2p::AionBehaviour>, NodeError> {
         let keypair = aion_p2p::keypair_from_identity(&self.p2p_identity)?;
-        Ok(aion_p2p::build_swarm_with_limits(
+        Ok(aion_p2p::build_swarm_with_limits_and_autonat_config(
             keypair,
             self.caps.to_connection_limits(),
+            autonat_config,
         )?)
     }
 
@@ -78,6 +94,16 @@ impl Node {
     /// existing async/tokio-based design throughout.
     pub fn spawn(&self) -> Result<NodeHandle, NodeError> {
         let swarm = self.build_swarm()?;
+        Ok(handle::spawn(swarm))
+    }
+
+    /// Same as `spawn`, but with a caller-supplied AutoNAT config -- see
+    /// `build_swarm_with_autonat_config`.
+    pub fn spawn_with_autonat_config(
+        &self,
+        autonat_config: libp2p::autonat::Config,
+    ) -> Result<NodeHandle, NodeError> {
+        let swarm = self.build_swarm_with_autonat_config(autonat_config)?;
         Ok(handle::spawn(swarm))
     }
 }

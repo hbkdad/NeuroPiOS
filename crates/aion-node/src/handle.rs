@@ -19,7 +19,7 @@
 use aion_p2p::{AionBehaviour, AionBehaviourEvent, Topic};
 use futures::StreamExt;
 use libp2p::{
-    gossipsub,
+    autonat, gossipsub,
     kad::{self, QueryResult},
     swarm::SwarmEvent,
     Multiaddr, PeerId, Swarm,
@@ -57,6 +57,15 @@ pub enum NodeEvent {
     ClosestPeersFound {
         target: PeerId,
         peers: Vec<PeerId>,
+    },
+    /// The local node's assumed reachability status changed, per
+    /// `crates/aion-p2p/tests/autonat_reachability.rs`'s "Resolved issue"
+    /// note in `crates/aion-p2p/README.md`: this is reachability
+    /// DETECTION only (a real dial-back protocol exchange), not a
+    /// NAT-traversal transport by itself.
+    NatStatusChanged {
+        old: autonat::NatStatus,
+        new: autonat::NatStatus,
     },
 }
 
@@ -192,6 +201,11 @@ pub(crate) fn spawn(mut swarm: Swarm<AionBehaviour>) -> NodeHandle {
                                     peers: ok.peers,
                                 });
                             }
+                        }
+                        SwarmEvent::Behaviour(AionBehaviourEvent::Autonat(
+                            autonat::Event::StatusChanged { old, new },
+                        )) => {
+                            let _ = event_tx.send(NodeEvent::NatStatusChanged { old, new });
                         }
                         _ => {}
                     }
