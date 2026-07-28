@@ -1,0 +1,44 @@
+name: CI
+
+# Runs the AION subtree's real verification suite on every push and PR,
+# per docs/ROADMAP.md's security-audit finding that no CI existed at all
+# before this workflow. Does NOT touch the NeuroPiOS landing page
+# (index.html / releases/) -- there's nothing to build/test there.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+  python:
+    name: Python (poig_sim pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install poig_sim (with dev extras, for pytest)
+        working-directory: simulations/poig_sim
+        run: pip install -e ".[dev]"
+      - name: pytest -q
+        working-directory: simulations/poig_sim
+        run: pytest -q

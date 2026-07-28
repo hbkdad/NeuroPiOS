@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+# Only crates with real implementations are workspace members. The other
+# crates/* directories are README-only stubs (see docs/adr/0005-monorepo-structure.md)
+# and are added here as their implementation actually begins, per AGENTS.md's
+# "no fabricated completion" rule -- an empty stub is not a workspace member.
+members = [
+    "crates/aion-protocol",
+    "crates/aion-crypto",
+    "crates/aion-node",
+    "crates/aion-p2p",
+    "crates/aion-verifier",
+    "crates/aion-reputation",
+    "crates/aion-storage",
+    "crates/aion-cli",
+]
+
+[workspace.package]
+edition = "2021"
+license = "UNLICENSED"
