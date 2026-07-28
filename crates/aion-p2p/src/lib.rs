@@ -1,9 +1,15 @@
 //! AION P2P networking, per docs/adr/0002-p2p-stack.md: rust-libp2p on
 //! Tokio. GossipSub (job/announcement propagation), Identify, Kademlia
-//! (peer discovery), and AutoNAT (reachability detection) over
-//! TCP+Noise+Yamux. Circuit relay (the actual NAT-traversal transport, as
-//! opposed to AutoNAT's detection-only role) is still deferred to a
-//! follow-up.
+//! (peer discovery), AutoNAT (reachability detection), and circuit relay
+//! (the actual NAT-traversal transport AutoNAT alone can only detect the
+//! need for) over TCP+Noise+Yamux.
+//!
+//! Every node built by this crate gets BOTH relay roles -- relay-client
+//! (so it can dial an otherwise-unreachable peer through a relay) and
+//! relay-server (so it can help relay for others) -- rather than treating
+//! relaying as opt-in. This matches the same "no free-riders" choice
+//! already made for Kademlia (every node is forced into server mode, per
+//! `build_kademlia`'s doc), not a new policy invented for relay.
 //!
 //! The P2P identity keypair can be either a fresh libp2p-generated Ed25519
 //! key (`identity::Keypair::generate_ed25519()`) or bridged from an
@@ -14,7 +20,7 @@
 //! that happen to both be called "identity".
 
 use libp2p::{
-    autonat, connection_limits, gossipsub, identify, identity, kad, noise,
+    autonat, connection_limits, gossipsub, identify, identity, kad, noise, relay,
     swarm::{NetworkBehaviour, Swarm},
     tcp, yamux, Multiaddr, PeerId,
 };
@@ -38,6 +44,11 @@ pub struct AionBehaviour {
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
     pub connection_limits: connection_limits::Behaviour,
     pub autonat: autonat::Behaviour,
+    /// Relay-server role: this node can act as a relay for other peers.
+    pub relay: relay::Behaviour,
+    /// Relay-client role: this node can dial other peers THROUGH a relay
+    /// (a `/p2p-circuit` address) when a direct connection isn't possible.
+    pub relay_client: relay::client::Behaviour,
 }
 
 pub const IDENTIFY_PROTOCOL_VERSION: &str = "/aion/identify/0.1.0";
@@ -216,6 +227,16 @@ pub fn build_autonat(local_peer_id: PeerId, config: autonat::Config) -> autonat:
     autonat::Behaviour::new(local_peer_id, config)
 }
 
+/// Builds the relay-SERVER role (this node can act as a relay for other
+/// peers, holding reservations and forwarding circuit traffic on their
+/// behalf) with the library's own default rate limits (per-peer and
+/// per-IP reservation/circuit caps) -- a starting point, not tuned
+/// against real network load, same caveat as every other default in this
+/// crate.
+pub fn build_relay_server(local_peer_id: PeerId) -> relay::Behaviour {
+    relay::Behaviour::new(local_peer_id, relay::Config::default())
+}
+
 /// Conservative default connection limits, per docs/adr/0002-p2p-stack.md's
 /// anti-spam requirement and docs/ARCHITECTURE.md's Node Safety principle
 /// extended to network resources, not just CPU/memory/storage: a node
@@ -275,7 +296,9 @@ pub fn build_swarm_with_limits_and_autonat_config(
             yamux::Config::default,
         )
         .map_err(|e| P2pError::SwarmBuild(e.to_string()))?
-        .with_behaviour(|key| {
+        .with_relay_client(noise::Config::new, yamux::Config::default)
+        .map_err(|e| P2pError::SwarmBuild(e.to_string()))?
+        .with_behaviour(|key, relay_client| {
             let gossipsub = build_gossipsub(key)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             let identify = build_identify(key);
@@ -283,12 +306,15 @@ pub fn build_swarm_with_limits_and_autonat_config(
             let kademlia = build_kademlia(local_peer_id);
             let connection_limits = connection_limits::Behaviour::new(limits);
             let autonat = build_autonat(local_peer_id, autonat_config);
+            let relay = build_relay_server(local_peer_id);
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(AionBehaviour {
                 gossipsub,
                 identify,
                 kademlia,
                 connection_limits,
                 autonat,
+                relay,
+                relay_client,
             })
         })
         .map_err(|e| P2pError::SwarmBuild(e.to_string()))?
