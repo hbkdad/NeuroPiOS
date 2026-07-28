@@ -39,6 +39,18 @@ impl Identity {
         self.signing_key.verifying_key().to_bytes()
     }
 
+    /// Exports the raw 32-byte secret seed. This exists specifically for
+    /// deliberate, explicit cross-crate identity bridging -- e.g.
+    /// `crates/aion-p2p` constructing a `libp2p::identity::Keypair` from the
+    /// SAME key material, so a node's P2P identity (docs/ARCHITECTURE.md's
+    /// Identity Separation section) is genuinely one Ed25519 key, not two
+    /// unrelated ones that happen to both be called "identity". Callers
+    /// must treat the returned bytes with the same care as the `Identity`
+    /// itself -- this is not a general-purpose accessor.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
+
     pub fn sign(&self, payload: &[u8]) -> Signature {
         self.signing_key.sign(payload)
     }
@@ -96,5 +108,20 @@ mod tests {
         let a = Identity::from_bytes(&seed);
         let b = Identity::from_bytes(&seed);
         assert_eq!(a.public_key_bytes(), b.public_key_bytes());
+    }
+
+    #[test]
+    fn to_bytes_then_from_bytes_reconstructs_the_same_identity() {
+        let original = Identity::generate();
+        let exported = original.to_bytes();
+        let reconstructed = Identity::from_bytes(&exported);
+        assert_eq!(
+            original.public_key_bytes(),
+            reconstructed.public_key_bytes()
+        );
+
+        // and it's still usable for real signing after reconstruction
+        let sig = reconstructed.sign(b"payload");
+        assert!(verify(&original.public_key_bytes(), b"payload", &sig).is_ok());
     }
 }

@@ -11,6 +11,13 @@ pub use resource_caps::ResourceCaps;
 pub use roles::{NodeRoleKind, NodeRoles};
 
 use aion_crypto::Identity;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum NodeError {
+    #[error("failed to start P2P layer: {0}")]
+    P2p(#[from] aion_p2p::P2pError),
+}
 
 /// A node's P2P identity, kept separate from any wallet identity per
 /// docs/ARCHITECTURE.md's Identity Separation section -- the wallet
@@ -39,6 +46,18 @@ impl Node {
 
     pub fn p2p_public_key_bytes(&self) -> [u8; 32] {
         self.p2p_identity.public_key_bytes()
+    }
+
+    /// Builds a P2P swarm using THIS node's own identity (bridged via
+    /// `aion_p2p::keypair_from_identity`, per docs/ARCHITECTURE.md's
+    /// Identity Separation section) -- the node's PeerID is genuinely
+    /// derived from its `p2p_identity`, not a separately-generated key.
+    /// This does not start listening or dialing anything; the caller
+    /// drives the returned swarm (see crates/aion-p2p's tests for the
+    /// event-loop pattern this is meant to be driven with).
+    pub fn build_swarm(&self) -> Result<libp2p::swarm::Swarm<aion_p2p::AionBehaviour>, NodeError> {
+        let keypair = aion_p2p::keypair_from_identity(&self.p2p_identity)?;
+        Ok(aion_p2p::build_swarm(keypair)?)
     }
 }
 
