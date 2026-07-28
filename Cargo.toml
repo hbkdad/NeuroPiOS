@@ -12,6 +12,7 @@ members = [
     "crates/aion-verifier",
     "crates/aion-reputation",
     "crates/aion-storage",
+    "crates/aion-cli",
 ]
 
 [workspace.package]

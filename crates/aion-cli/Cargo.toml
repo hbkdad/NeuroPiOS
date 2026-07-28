@@ -1,0 +1,20 @@
+[package]
+name = "aion-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "AION `aion` CLI: local multi-process devnet (docs/ROADMAP.md Phase 3+) -- `aion devnet up|status|down`"
+
+[[bin]]
+name = "aion"
+path = "src/main.rs"
+
+[dependencies]
+aion-node = { path = "../aion-node" }
+clap = { version = "4", features = ["derive"] }
+libp2p = { version = "0.56", features = ["tokio", "tcp", "noise", "yamux", "gossipsub", "identify", "kad", "macros"] }
+thiserror = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
